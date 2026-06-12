@@ -4,37 +4,24 @@ import java.util.List;
 
 public record FunctionType(
         List<ValueType> params,
-        List<ValueType> results
+        ValueType result
 ) {
     public FunctionType {
         params = List.copyOf(params);
-        results = List.copyOf(results);
-
-        // Optional simplification for MVP:
-        // WebAssembly supports multiple results, but you may choose not to.
-        if (results.size() > 1) {
-            throw new IllegalArgumentException(
-                    "This interpreter subset supports at most one result"
-            );
-        }
     }
 
     public boolean hasResult() {
-        return !results.isEmpty();
+        return result != null;
     }
 
     public ValueType resultType() {
-        if (results.isEmpty()) {
+        if (!hasResult()) {
             throw new IllegalStateException("Function has no result");
         }
-        return results.getFirst();
+        return result;
     }
 
     public int paramCount() {
         return params.size();
-    }
-
-    public int resultCount() {
-        return results.size();
     }
 }

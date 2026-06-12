@@ -16,7 +16,7 @@ public record FunctionDef(
         return type.params();
     }
 
-    public List<ValueType> results() {
-        return type.results();
+    public ValueType result() {
+        return type.result();
     }
 }

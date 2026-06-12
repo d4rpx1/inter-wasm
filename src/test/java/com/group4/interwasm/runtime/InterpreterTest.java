@@ -17,10 +17,11 @@ class InterpreterTest {
         // 2+3
         FunctionDef fn = new FunctionDef(
                 new FunctionType(
-                        List.of(),
-                        List.of(ValueType.I32)
+                        List.of(), // no params
+                        ValueType.I32 // result is integer 32
                 ),
-                List.of(),
+                List.of(), // no locals (in wasm, function params are also locals)
+                // Instructions
                 List.of(
                         new ConstI32(2),
                         new ConstI32(3),
@@ -31,8 +32,8 @@ class InterpreterTest {
         Interpreter interpreter = new Interpreter(fn);
 
         // Should multiple results even be supported?
-        List<WasmValue> result = interpreter.invoke(List.of());
+        WasmValue result = interpreter.invoke(List.of());
 
-        assertEquals(5, result.getFirst().asI32());
+        assertEquals(5, result.asI32());
     }
 }

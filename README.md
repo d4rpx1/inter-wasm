@@ -1,6 +1,6 @@
 # InterWasm
 
-InterWasm is an interpreter-engine for a Subset of WebAssembly (WASM) bytecode. We use pre-built WASM-Bytecode using `emcc` from https://github.com/emscripten-core/emsdk and write an interpreter for the bytecode. We benchmark our interpreter-engine against real Reference-Engines (wasm3, wuasmtime). 
+InterWasm is an interpreter-engine for a Subset of WebAssembly (WASM) bytecode. We use pre-built WASM-Bytecode using `clang` from https://github.com/emscripten-core/emsdk and write an interpreter for the bytecode. We benchmark our interpreter-engine against real Reference-Engines (wasm3, wuasmtime). 
 
 ## Subset Scope
 
@@ -15,4 +15,4 @@ Only `i32`. This is enough for all interesting benchmarks.
 ## Helpers
 
 * wasm2wat: converts from binary wasm to a text format for debugging (https://webassembly.github.io/wabt/demo/wasm2wat/)
-* generating the wasm bytecode: emcc <filename.c>
+* generating the wasm bytecode: `clang --target=wasm32 -O3 -nostdlib -o <output_file> <input_file> -v`
