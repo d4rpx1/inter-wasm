@@ -33,6 +33,10 @@ public final class Interpreter {
     }
 
     private void execute(Instruction instruction, Frame frame) {
+        // Beware when writing locals: the function parameters are also conted as locals
+        // so for example function test(int a)  { int b = 0 } b would be local 1 and a local 0
+        // but the c compiler would optimize be to a const anyways, so use wat2wasm if you
+        // want to not have to play with the clang optimizer
         switch (instruction) {
             case ConstI32 c -> {
                 frame.operandStack().push(WasmValue.i32(c.value()));
@@ -44,6 +48,8 @@ public final class Interpreter {
 
                 frame.operandStack().pushI32(a + b);
             }
+
+            // TODO: add other instructions
 
             default -> throw new UnsupportedOperationException(
                     "Unsupported instruction: " + instruction

@@ -3,8 +3,10 @@ package com.group4.interwasm.bytecode;
 import com.group4.interwasm.instruction.ConstI32;
 import com.group4.interwasm.instruction.I32Add;
 import com.group4.interwasm.instruction.LocalGet;
+import com.group4.interwasm.instruction.LocalSet;
 import com.group4.interwasm.model.FunctionDef;
 import com.group4.interwasm.model.ValueType;
+import com.group4.interwasm.util.FilesUtil;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -17,17 +19,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class WasmReaderTest {
     @Test
     void readAddFileTest() {
-        ClassLoader classloader = Thread.currentThread().getContextClassLoader();
-        URL resourceUrl = classloader.getResource("wasm-examples/add/add.wasm");
-
-        if (resourceUrl == null) {
-            throw new IllegalArgumentException("File not found!");
-        }
-
+        String wasmFilePath = FilesUtil.getPathToResourceFile("wasm-examples/add_with_local/add_with_local.wasm");
         AtomicReference<FunctionDef> functionDefAtomic = new AtomicReference<>();
 
         assertDoesNotThrow(() -> {
-            WasmReader reader = new WasmReader(new File(resourceUrl.toURI()));
+            WasmReader reader = new WasmReader(new File(wasmFilePath));
             functionDefAtomic.set(reader.readFunctionDefinition());
         });
 
@@ -37,16 +33,14 @@ class WasmReaderTest {
         assertEquals(List.of(ValueType.I32), functionDef.type().params()); // one integer parameter parameters (a from add.wasm)
         assertEquals(List.of(ValueType.I32), functionDef.locals()); // one integer local (b from add.wasm)
 
-        // TODO Maybe we must implement IComparable right
-        // so the check wheter localget(0) == localget(0) (two different objects) works
         assertEquals(
                 List.of(
-                        new I32Add(),
+                        new ConstI32(5),
+                        new LocalSet(1),
                         new LocalGet(0),
-                        new ConstI32(5)
+                        new LocalGet(1),
+                        new I32Add()
                 ), functionDef.body()
         );
-
-
     }
 }

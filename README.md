@@ -16,3 +16,4 @@ Only `i32`. This is enough for all interesting benchmarks.
 
 * wasm2wat: converts from binary wasm to a text format for debugging (https://webassembly.github.io/wabt/demo/wasm2wat/)
 * generating the wasm bytecode: `clang --target=wasm32 -O3 -nostdlib -o <output_file> <input_file> -v`
+* for testing we sometimes used wat2wasm directly to convert from text interpretation of the web assembly bytecode to the actual bytecode because C sometimes optimizes the code and does not allow for reliable testing

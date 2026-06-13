@@ -1,5 +1,9 @@
 package com.group4.interwasm.bytecode;
 
+import com.group4.interwasm.instruction.ConstI32;
+import com.group4.interwasm.instruction.I32Add;
+import com.group4.interwasm.instruction.LocalGet;
+import com.group4.interwasm.instruction.LocalSet;
 import com.group4.interwasm.model.FunctionDef;
 import com.group4.interwasm.model.FunctionType;
 import com.group4.interwasm.model.Instruction;
@@ -9,10 +13,7 @@ import jdk.jshell.spi.ExecutionControl;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HexFormat;
-import java.util.List;
+import java.util.*;
 
 /**
  * Reads .wasm file with one single function and creates FunctionDef
@@ -61,7 +62,29 @@ public class WasmReader {
      * @return list of value types of locals
      */
     private List<ValueType> extractLocals(byte[] bytes) {
-        throw new IllegalArgumentException("Not yet implemented");
+        // The code section and type section are bound by order
+        // so e.x. type 0 is the function type that belongs to the instructions
+        // from function body 0 of the code section
+        // we also skip the size of the code section here (first byte) because we
+        // only interpret wasm files that have one single function
+        int actByte = 1;
+        actByte += 1; // also skip the size of the body with ID 0 (function body)
+        int localDeclarationGroupsSize = bytes[actByte++];
+
+        if (localDeclarationGroupsSize > 1) {
+            throw new IllegalArgumentException("Multiple local declaration groups not supported! Only I32 values are supported.");
+        }
+
+        int localsSize = bytes[actByte]; // TODO maybe use the Le128 here but we won't have more than 128 locals anyways
+
+        List<ValueType> locals = new ArrayList<>();
+
+        for (int i = 0; i < localsSize; i++) {
+            actByte += 1; // skip the id of the local, we do not need this (yet?) since it is an incrementing int
+            locals.add(ValueType.fromBinaryCode(bytes[actByte++]));
+        }
+
+        return locals;
     }
 
     /**
@@ -71,7 +94,63 @@ public class WasmReader {
      * @return a list of the instructions
      */
     private List<Instruction> extractInstructions(byte[] bytes) {
-        throw new IllegalArgumentException("Not yet implemented");
+        // The code section and type section are bound by order
+        // so e.x. type 0 is the function type that belongs to the instructions
+        // from function body 0 of the code section
+        int actByte = 1; // skip the size of the code section here (first byte) because we
+        // only interpret wasm files that have one single function
+        actByte += 1; // also skip the size of the body with ID 0 (function body)
+        actByte += 1; // also skip the size of the local declaration groups
+
+        int localsSize = bytes[actByte++]; // TODO maybe use the Le128 here but we won't have more than 128 locals anyways
+
+        actByte += localsSize; //  skip the locals since we read them in extractLocals
+
+        // read opcodes
+        List<Instruction> instructions = new ArrayList<>();
+
+        while (true) {
+            if (actByte >= bytes.length) {
+                throw new IllegalArgumentException("Reached end of instruction bytecode and no 0x0B instruction" +
+                        " found, which should signal the end of the bytecode.");
+            }
+
+            OpCode opcode = OpCode.fromBytecode(bytes[actByte++]);
+
+            switch (opcode) {
+                case END -> {
+                    return instructions;
+                }
+
+                case I32_CONST  -> {
+                    var result = Leb128.readUnsigned(bytes, actByte);
+                    actByte += result.bytesRead();
+                    int value = result.value();
+
+                    instructions.add(new ConstI32(value));
+                }
+
+                case LOCAL_GET  -> {
+                    var result = Leb128.readUnsigned(bytes, actByte);
+                    actByte += result.bytesRead();
+                    int index = result.value();
+
+                    instructions.add(new LocalGet(index));
+                }
+
+                case LOCAL_SET  -> {
+                    var result = Leb128.readUnsigned(bytes, actByte);
+                    actByte += result.bytesRead();
+                    int index = result.value();
+
+                    instructions.add(new LocalSet(index));
+                }
+
+                case I32_ADD -> {
+                    instructions.add(new I32Add());
+                }
+            }
+        }
     }
 
     /**
@@ -80,7 +159,49 @@ public class WasmReader {
      * @return object of FunctionType
      */
     private FunctionType extractFunctionType(byte[] bytes) {
-        throw new IllegalArgumentException("Not yet implemented");
+        // The type section starts with the size of the types
+        // we only support one function per file, also one type
+        // then, comes 0x60 for the function kind.
+        // then we have a Leb128-encoded size of params
+        // after which the params are followed and the size of return values
+        // however our interpreter only supports one return value
+        int actByte = 0;
+
+        int amountTypes = bytes[actByte++];
+
+        if (amountTypes > 1) {
+            throw new IllegalArgumentException("This interpreter only supports .wasm files with one single function!");
+        }
+
+        int kind = bytes[actByte++];
+
+        if (kind != 0x60) {
+            throw new IllegalArgumentException("Expected function kind 0x60 but got 0x" + Integer.toHexString(kind));
+        }
+
+        // Get all parameters
+
+        var paramCountResult = Leb128.readUnsigned(bytes, actByte);
+        actByte = paramCountResult.bytesRead() + actByte;
+        int paramCount = paramCountResult.value();
+
+        List<ValueType> params = new ArrayList<>();
+
+        int parametersSize = paramCount + actByte;
+        while (actByte < parametersSize) {
+            params.add(ValueType.fromBinaryCode(bytes[actByte]));
+            actByte += 1;
+        }
+
+        // Get return value
+        actByte += 1; // skip size of the return value
+
+        ValueType returnValue = ValueType.fromBinaryCode(bytes[actByte]);
+
+        return new FunctionType(
+                params,
+                returnValue
+        );
     }
 
     /**
