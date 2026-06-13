@@ -1,14 +1,13 @@
 package com.group4.interwasm.bytecode;
 
-import com.group4.interwasm.instruction.ConstI32;
-import com.group4.interwasm.instruction.I32Add;
-import com.group4.interwasm.instruction.LocalGet;
-import com.group4.interwasm.instruction.LocalSet;
+import com.group4.interwasm.instruction.i32.ConstI32;
+import com.group4.interwasm.instruction.arithmetic.I32Add;
+import com.group4.interwasm.instruction.locals.LocalGet;
+import com.group4.interwasm.instruction.locals.LocalSet;
 import com.group4.interwasm.model.FunctionDef;
 import com.group4.interwasm.model.FunctionType;
 import com.group4.interwasm.model.Instruction;
 import com.group4.interwasm.model.ValueType;
-import jdk.jshell.spi.ExecutionControl;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,7 +22,7 @@ public class WasmReader {
     private byte[] bytecode;
 
     // https://charlycst.github.io/posts/wasm-encoding/
-    private static byte[] MAGIC_BYTES =  HexFormat.of().parseHex("0061736D01000000");
+    private static final byte[] MAGIC_BYTES =  HexFormat.of().parseHex("0061736D01000000");
 
     public WasmReader(File bytecodeFile) {
         this.bytecodeFile = bytecodeFile;
@@ -148,6 +147,8 @@ public class WasmReader {
 
                     instructions.add(new LocalSet(index));
                 }
+
+                // TODO: add other opcodes
 
                 case I32_ADD -> {
                     instructions.add(new I32Add());

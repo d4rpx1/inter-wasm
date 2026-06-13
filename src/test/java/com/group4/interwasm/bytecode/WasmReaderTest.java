@@ -1,16 +1,15 @@
 package com.group4.interwasm.bytecode;
 
-import com.group4.interwasm.instruction.ConstI32;
-import com.group4.interwasm.instruction.I32Add;
-import com.group4.interwasm.instruction.LocalGet;
-import com.group4.interwasm.instruction.LocalSet;
+import com.group4.interwasm.instruction.i32.ConstI32;
+import com.group4.interwasm.instruction.arithmetic.I32Add;
+import com.group4.interwasm.instruction.locals.LocalGet;
+import com.group4.interwasm.instruction.locals.LocalSet;
 import com.group4.interwasm.model.FunctionDef;
 import com.group4.interwasm.model.ValueType;
 import com.group4.interwasm.util.FilesUtil;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
-import java.net.URL;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 

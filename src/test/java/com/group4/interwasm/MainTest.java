@@ -49,7 +49,7 @@ class MainTest {
 
     @Test
     void testSimpleLoop() {
-        String wasmFilePath = FilesUtil.getPathToResourceFile("wasm-examples/simple_loop/loop.wasm");
+        String wasmFilePath = FilesUtil.getPathToResourceFile("wasm-examples/simple_loop/simple_loop.wasm");
         AtomicReference<WasmValue> funcdefReturn = new AtomicReference<>();
 
         assertDoesNotThrow(() -> {

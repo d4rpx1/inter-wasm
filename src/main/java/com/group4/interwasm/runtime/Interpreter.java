@@ -1,12 +1,10 @@
 package com.group4.interwasm.runtime;
-import com.group4.interwasm.instruction.ConstI32;
-import com.group4.interwasm.instruction.I32Add;
+import com.group4.interwasm.instruction.i32.ConstI32;
+import com.group4.interwasm.instruction.arithmetic.I32Add;
 import com.group4.interwasm.model.FunctionDef;
 import com.group4.interwasm.model.Instruction;
 
-import java.util.ArrayList;
 import java.util.List;
-import com.group4.interwasm.runtime.Frame;
 
 /**
  * Interpreter for one single function
