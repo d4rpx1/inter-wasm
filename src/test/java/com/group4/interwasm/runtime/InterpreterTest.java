@@ -36,4 +36,6 @@ class InterpreterTest {
 
         assertEquals(5, result.asI32());
     }
+
+    // TODO add tests for loop, blocks, ifs, ... and implement these
 }

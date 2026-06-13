@@ -11,7 +11,7 @@ public class FilesUtil {
      */
     public static String getPathToResourceFile(String path) {
         ClassLoader classloader = Thread.currentThread().getContextClassLoader();
-        URL resourceUrl = classloader.getResource("wasm-examples/add_with_local/add_with_local.wasm");
+        URL resourceUrl = classloader.getResource(path);
 
         if (resourceUrl == null) {
             throw new IllegalArgumentException("File not found!");

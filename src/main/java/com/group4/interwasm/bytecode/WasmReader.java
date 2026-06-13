@@ -74,14 +74,16 @@ public class WasmReader {
         if (localDeclarationGroupsSize > 1) {
             throw new IllegalArgumentException("Multiple local declaration groups not supported! Only I32 values are supported.");
         }
+        else if (localDeclarationGroupsSize == 0) { // no local declaration groups
+            return List.of();
+        }
 
-        int localsSize = bytes[actByte]; // TODO maybe use the Le128 here but we won't have more than 128 locals anyways
+        int localsSize = bytes[actByte++]; // TODO maybe use the Le128 here but we won't have more than 128 locals anyways
 
         List<ValueType> locals = new ArrayList<>();
 
         for (int i = 0; i < localsSize; i++) {
-            actByte += 1; // skip the id of the local, we do not need this (yet?) since it is an incrementing int
-            locals.add(ValueType.fromBinaryCode(bytes[actByte++]));
+            locals.add(ValueType.fromBinaryCode(bytes[actByte]));
         }
 
         return locals;
@@ -100,11 +102,12 @@ public class WasmReader {
         int actByte = 1; // skip the size of the code section here (first byte) because we
         // only interpret wasm files that have one single function
         actByte += 1; // also skip the size of the body with ID 0 (function body)
-        actByte += 1; // also skip the size of the local declaration groups
+        int localDeclarationGroupsSize = bytes[actByte++];
 
-        int localsSize = bytes[actByte++]; // TODO maybe use the Le128 here but we won't have more than 128 locals anyways
-
-        actByte += localsSize; //  skip the locals since we read them in extractLocals
+        actByte += localDeclarationGroupsSize * 2; //  skip the locals since we read them in extractLocals
+        // the locals are stored in groups like 02 127 would be first group that has two integer locals
+        // then the second group would be 01 xxx that has one value type xxx so we skip by multiplying local
+        // declaration groups by two
 
         // read opcodes
         List<Instruction> instructions = new ArrayList<>();

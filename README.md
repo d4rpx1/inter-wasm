@@ -11,6 +11,8 @@ Only `i32`. This is enough for all interesting benchmarks.
 - **Control flow:** `block`, `loop`, `if/else`, `br`, `br_if`, `return`, `call`
 - **Memory:** `i32.load/store`, `memory.size/grow` linear memory as `uint8_t[]`
 - **Omitted:** floats, `call_indirect`/tables, SIMD, everything post-MVP
+- **Omitted:** recursion, IO, .wasm file with multiple functions
+- **Omitted:** memory
 
 ## Helpers
 

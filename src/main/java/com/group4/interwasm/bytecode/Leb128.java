@@ -1,7 +1,7 @@
 package com.group4.interwasm.bytecode;
 
 /**
- * The size of a section within the wasm file is encoding using Leb128
+ * WASM uses oftentimes Leb128 for encoding of numbers
  * there, the least significant bit is not used for the number,
  * it is instead used to communicate whether there is one more byte left
  * when it's 1 it means there's one more byte to follow when it's 0 it means
