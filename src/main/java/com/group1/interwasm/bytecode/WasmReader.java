@@ -1,9 +1,12 @@
 package com.group1.interwasm.bytecode;
 
+import com.group1.interwasm.instruction.arithmetic.*;
+import com.group1.interwasm.instruction.comparisons.*;
+import com.group1.interwasm.instruction.control_flow.*;
 import com.group1.interwasm.instruction.i32.ConstI32;
-import com.group1.interwasm.instruction.arithmetic.I32Add;
 import com.group1.interwasm.instruction.locals.LocalGet;
 import com.group1.interwasm.instruction.locals.LocalSet;
+import com.group1.interwasm.instruction.locals.LocalTee;
 import com.group1.interwasm.model.FunctionDef;
 import com.group1.interwasm.model.FunctionType;
 import com.group1.interwasm.model.Instruction;
@@ -108,6 +111,10 @@ public class WasmReader {
         // then the second group would be 01 xxx that has one value type xxx so we skip by multiplying local
         // declaration groups by two
 
+        // stacks, to keep track of context in nested blocks
+        Deque<List<Instruction>> listStack = new ArrayDeque<>();
+        Deque<OpCode> typeStack = new ArrayDeque<>();
+
         // read opcodes
         List<Instruction> instructions = new ArrayList<>();
 
@@ -120,8 +127,59 @@ public class WasmReader {
             OpCode opcode = OpCode.fromBytecode(bytes[actByte++]);
 
             switch (opcode) {
+                case BLOCK -> {
+                    actByte++;
+                    listStack.push(instructions);
+                    typeStack.push(OpCode.BLOCK);
+                    instructions = new ArrayList<>();
+                }
+
+                case IF -> {
+                    actByte++;
+                    listStack.push(instructions);
+                    typeStack.push(OpCode.IF);
+                    instructions = new ArrayList<>();
+                }
+
+                case LOOP -> {
+                    actByte++;
+                    listStack.push(instructions);
+                    typeStack.push(OpCode.LOOP);
+                    instructions = new ArrayList<>();
+                }
+
                 case END -> {
-                    return instructions;
+                    if (listStack.isEmpty()) {
+                        return instructions; // Hauptfunktion ist komplett beendet
+                    }
+
+                    List<Instruction> currentBody = instructions;
+                    OpCode parentType = typeStack.pop();
+
+                    if (parentType == OpCode.LOOP) {
+                        instructions = listStack.pop();
+                        instructions.add(new Loop(currentBody));
+                    }
+                    else if (parentType == OpCode.BLOCK) {
+                        instructions = listStack.pop();
+                        instructions.add(new Block(currentBody));
+                    }
+                    else if (parentType == OpCode.IF) {
+                        // Fall A: Ein IF ohne ELSE-Zweig ist zu Ende gegangen!
+                        List<Instruction> thenBody = currentBody;
+                        List<Instruction> elseBody = List.of(); // Der Else-Zweig ist einfach leer
+
+                        instructions = listStack.pop(); // Die äußeren Instruktionen zurückholen
+                        instructions.add(new If(thenBody, elseBody));
+                    }
+                    else if (parentType == OpCode.ELSE) {
+                        // Fall B: Ein IF mit ELSE-Zweig ist zu Ende gegangen!
+                        List<Instruction> elseBody = currentBody; // Das hier ist der fertige else-Zweig
+                        List<Instruction> thenBody = listStack.pop(); // Den vorher gesicherten then-Zweig vom Stack holen
+
+                        instructions = listStack.pop(); // Die ganz äußeren Instruktionen zurückholen
+                        instructions.add(new If(thenBody, elseBody));
+                    }
                 }
 
                 case I32_CONST  -> {
@@ -148,7 +206,78 @@ public class WasmReader {
                     instructions.add(new LocalSet(index));
                 }
 
-                // TODO: add other opcodes
+                case BR_IF -> {
+                    var result = Leb128.readUnsigned(bytes, actByte);
+                    actByte += result.bytesRead();
+                    instructions.add(new BrIf(result.value()));
+                }
+
+                case BR -> {
+                    var result = Leb128.readUnsigned(bytes, actByte);
+                    actByte += result.bytesRead();
+                    instructions.add(new Br(result.value()));
+                }
+
+                case LOCAL_TEE -> {
+                    var result = Leb128.readUnsigned(bytes, actByte);
+                    actByte += result.bytesRead();
+                    instructions.add(new LocalTee(result.value()));
+                }
+
+                case ELSE -> {
+                    listStack.push(instructions);
+                    typeStack.pop();
+                    typeStack.push(OpCode.ELSE);
+                    instructions = new ArrayList<>();
+                }
+
+                case I32_GT_S -> {
+                    instructions.add(new I32GtS());
+                }
+
+                case I32_SUB -> {
+                    instructions.add(new I32Sub());
+                }
+
+                case I32_MUL -> {
+                    instructions.add(new I32Mul());
+                }
+
+                case I32_DIV_S -> {
+                    instructions.add(new I32DivS());
+                }
+
+                case I32_REM_S -> {
+                    instructions.add(new I32RemS());
+                }
+
+                case I32_EQ -> {
+                    instructions.add(new I32Eq());
+                }
+
+                case RETURN -> {
+                    instructions.add(new Return());
+                }
+
+                case I32_EQZ -> {
+                    instructions.add(new I32Eqz());
+                }
+
+                case I32_GE_S -> {
+                    instructions.add(new I32GeS());
+                }
+
+                case I32_LE_S -> {
+                    instructions.add(new I32LeS());
+                }
+
+                case I32_LT_S -> {
+                    instructions.add(new I32LtS());
+                }
+
+                case I32_NE -> {
+                    instructions.add(new I32Ne());
+                }
 
                 case I32_ADD -> {
                     instructions.add(new I32Add());

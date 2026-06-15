@@ -84,8 +84,7 @@ class WasmReaderTest {
         assertEquals(List.of(ValueType.I32), functionDef.type().params()); // one integer parameter parameters (a from add.wasm)
         assertEquals(List.of(ValueType.I32), functionDef.locals()); // one integer local (b from add.wasm)
 
-        // TODO: add assertEquals, do this after Interpreter part is done
-        /*assertEquals(
+        assertEquals(
                 List.of(
                         new ConstI32(5),
                         new LocalSet(1),
@@ -93,7 +92,7 @@ class WasmReaderTest {
                         new LocalGet(1),
                         new I32Add()
                 ), functionDef.body()
-        );*/
+        );
     }
 
     @Test
@@ -112,8 +111,7 @@ class WasmReaderTest {
         assertEquals(List.of(ValueType.I32), functionDef.type().params()); // one integer parameter parameters (a from add.wasm)
         assertEquals(List.of(ValueType.I32), functionDef.locals()); // one integer local (b from add.wasm)
 
-        // TODO: add assertEquals, do this after Interpreter part is done
-        /*assertEquals(
+        assertEquals(
                 List.of(
                         new ConstI32(5),
                         new LocalSet(1),
@@ -121,7 +119,7 @@ class WasmReaderTest {
                         new LocalGet(1),
                         new I32Add()
                 ), functionDef.body()
-        );*/
+        );
     }
 
     @Test
@@ -140,8 +138,7 @@ class WasmReaderTest {
         assertEquals(List.of(ValueType.I32), functionDef.type().params()); // one integer parameter parameters (a from add.wasm)
         assertEquals(List.of(ValueType.I32), functionDef.locals()); // one integer local (b from add.wasm)
 
-        // TODO: add assertEquals, do this after Interpreter part is done
-        /*assertEquals(
+        assertEquals(
                 List.of(
                         new ConstI32(5),
                         new LocalSet(1),
@@ -149,6 +146,6 @@ class WasmReaderTest {
                         new LocalGet(1),
                         new I32Add()
                 ), functionDef.body()
-        );*/
+        );
     }
 }
