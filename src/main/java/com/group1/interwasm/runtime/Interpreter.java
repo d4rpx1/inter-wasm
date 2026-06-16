@@ -24,17 +24,20 @@ public final class Interpreter {
         return frame.operandStack().pop();
     }
 
-    private void executeBody(List<Instruction> body, Frame frame) {
+    private ControlSignal executeBody(List<Instruction> body, Frame frame) {
         for (Instruction instruction : body) {
-            execute(instruction, frame);
+            ControlSignal signal = execute(instruction, frame);
+            if (!(signal instanceof ControlSignal.Next)) {
+                return signal;
+            }
         }
+        return ControlSignal.NEXT;
     }
 
-    private void execute(Instruction instruction, Frame frame) {
-        // Beware when writing locals: the function parameters are also conted as locals
-        // so for example function test(int a)  { int b = 0 } b would be local 1 and a local 0
-        // but the c compiler would optimize be to a const anyways, so use wat2wasm if you
-        // want to not have to play with the clang optimizer
+    private ControlSignal execute(Instruction instruction, Frame frame) {
+        
+        OperandStack stack = frame.operandStack();
+
         switch (instruction) {
             case ConstI32 c -> {
                 frame.operandStack().push(WasmValue.i32(c.value()));
