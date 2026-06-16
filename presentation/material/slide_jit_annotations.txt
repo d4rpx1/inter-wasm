@@ -1,0 +1,68 @@
+==============================================================
+ SLIDE: JVM C1 JIT — What execute() Compiles To
+ From: -XX:+PrintCompilation -XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining
+ (hsdis raw hex shown — mnemonic annotations are from JVM metadata comments)
+==============================================================
+
+The JVM (C1 compiler tier) inlines and compiles execute() after ~10k calls.
+The annotation comments confirm the sequence inside the compiled native code:
+
+  ── DISPATCH ──────────────────────────────────────────────────
+  ; stats.dispatches++ (line 45)
+  ;   com.group1.interwasm.runtime.Interpreter::execute
+
+  ; getfield operandStack (line 46)
+  ;   loading the OperandStack object from the Frame
+
+  ; invokedynamic typeSwitch (line 48)
+  ;   Interpreter$$TypeSwitch — maps sealed subtype to int index
+  ;   (similar to C's switch label; O(1) via tableswitch)
+
+  ; tableswitch (line 48)
+  ;   25 cases: ConstI32=0, I32Add=1, ..., Unreachable=24
+
+  ── OPERANDENZUGRIFF ──────────────────────────────────────────
+  ; {metadata for OperandStack::popI32 '()I'}
+  ; - com.group1.interwasm.util.OperandStack::popI32@1 (line 41)
+  ; - com.group1.interwasm.runtime.Interpreter::execute@958 (line 140)
+  ;   ↑ JIT INLINED popI32 into execute() — but still:
+  ;     invokevirtual Deque::pop() = virtual dispatch + ArrayDeque bounds check
+
+  ; {metadata for OperandStack::pushI32 '(I)V'}
+  ; - com.group1.interwasm.util.OperandStack::pushI32@... (line 36)
+  ; - com.group1.interwasm.runtime.Interpreter::execute@... (line ...)
+  ;   ↑ JIT INLINED pushI32 into execute() — same story
+
+  ── NUTZLAST ──────────────────────────────────────────────────
+  ; iadd — one native ADD instruction
+  ; The JIT does NOT lift this to a register op because the inputs
+  ; must first be extracted from the ArrayDeque heap objects.
+
+──────────────────────────────────────────────────────────────
+ Key insight from JIT output:
+──────────────────────────────────────────────────────────────
+
+  ✓ Dispatch: typeSwitch+tableswitch compiled to O(1) jump table (good — same as C)
+  ✓ Nutzlast: iadd/isub/etc compiled to single native instruction (good — same as C)
+  ✗ Operandenzugriff: each pop/push still goes through ArrayDeque.pop()/push()
+      → virtual dispatch (invokevirtual, even if JIT inlines it)
+      → object allocation: every WasmValue is a heap-allocated record
+      → GC pressure from short-lived WasmValue objects on every arithmetic op
+      This is the main cost that a C interpreter avoids with a plain int sp[] array.
+
+──────────────────────────────────────────────────────────────
+ Printed compilation events (from -XX:+PrintCompilation):
+──────────────────────────────────────────────────────────────
+
+  <timestamp>  n   java.lang.invoke.MethodHandle::linkToNative (native)
+  <timestamp>      com.group1.interwasm.runtime.Interpreter::execute (C1)
+  <timestamp>      com.group1.interwasm.runtime.Interpreter::executeBody (C1)
+  <timestamp>      com.group1.interwasm.util.OperandStack::popI32 (C1, inlined)
+  <timestamp>      com.group1.interwasm.util.OperandStack::pushI32 (C1, inlined)
+  <timestamp>      com.group1.interwasm.runtime.Frame::getLocal (C1, inlined)
+  <timestamp>      com.group1.interwasm.runtime.Frame::setLocal (C1, inlined)
+
+  C1 = client compiler (fast compile, basic optimizations)
+  C2 = server/optimizing compiler (kicks in after ~10k–100k iterations)
+       C2 would further optimize the hot paths with escape analysis + scalar replacement
+==============================================================

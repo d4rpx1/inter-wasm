@@ -1,0 +1,9 @@
+=== Node.js / V8 JIT WebAssembly benchmark ===
+
+add_with_local(5)              input=    5  result=10     0.013 µs/call    74,807,688 calls/s
+simple_loop(0)                 input=    0  result=45     0.028 µs/call    36,195,662 calls/s
+fibonacci(10)                  input=   10  result=55     0.008 µs/call   128,750,004 calls/s
+count_primes(100)              input=  100  result=25     0.330 µs/call     3,027,222 calls/s
+
+Note: V8 JIT ≈ pure Nutzlast (no interpreter dispatch/operand overhead).
+Compare these numbers against the Java interpreter benchmark.

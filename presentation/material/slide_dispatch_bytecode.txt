@@ -1,0 +1,54 @@
+==============================================================
+ SLIDE: JVM Bytecode — execute() for I32Add
+ Three categories from slide 17 annotated
+==============================================================
+
+── DISPATCH (red) ────────────────────────────────────────────
+ Fetch next instruction and identify its type
+ (every single VM instruction pays this cost)
+
+    36: aload         4              // load instruction object
+    38: iload         5              // restart index (for re-entry on type mismatch)
+    40: invokedynamic #90            // typeSwitch(instruction, idx) → int
+                                    //   generated class: Interpreter$$TypeSwitch
+                                    //   checks instanceof for each sealed subtype
+    45: tableswitch   { // 0 to 24  // O(1) jump table — same as C switch
+                   0: 160           //   ConstI32
+                   1: 179           //   I32Add      ← we jump here
+                   2: 203           //   I32Sub
+                   3: 227           //   I32Mul
+                   ...
+                  24: 994           //   Unreachable
+             default: 1004          //   UnsupportedOperationException
+        }
+
+── OPERANDENZUGRIFF (blue) ───────────────────────────────────
+ Pop inputs from the operand stack, push result
+ Each invokevirtual = virtual dispatch + ArrayDeque bounds check + heap deref
+
+   179: aload_3                         // load OperandStack reference
+   180: invokevirtual popI32()          // pop b   ← ArrayDeque.pop() + .asI32()
+   183: istore        7                 // store b in JVM local slot 7
+   185: aload_3                         // load OperandStack reference
+   186: invokevirtual popI32()          // pop a   ← ArrayDeque.pop() + .asI32()
+   189: istore        8                 // store a in JVM local slot 8
+   191: aload_3                         // load OperandStack reference (for push)
+   192: iload         8                 // load a
+   194: iload         7                 // load b
+
+── NUTZLAST (green) ──────────────────────────────────────────
+ The actual semantic work of i32.add
+
+   196: iadd                            // ← THE ACTUAL WORK (1 bytecode)
+
+── OPERANDENZUGRIFF continued ────────────────────────────────
+   197: invokevirtual pushI32()         // push result ← ArrayDeque.push()
+   200: goto          1021              // back to executeBody loop → next dispatch
+
+==============================================================
+ COMPARISON with C switch-based interpreter (slide 18):
+   Dispatch:           both use O(1) table jump                ✓ same
+   Operandenzugriff:   C does sp[1]+=sp[0]; sp++  (~3 insns)
+                       Java does 3× invokevirtual              ✗ much more
+   Nutzlast:           C: addl; Java: iadd                     ✓ same
+==============================================================

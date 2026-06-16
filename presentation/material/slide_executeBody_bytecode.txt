@@ -1,0 +1,48 @@
+==============================================================
+ SLIDE: JVM Bytecode — executeBody() dispatch loop
+ The interpreter loop structure (from javap -p -c Interpreter.class)
+==============================================================
+
+  private ControlSignal executeBody(List<Instruction> body, Frame frame)
+
+  Bytecode:
+     0: aload_1                    // body (List<Instruction>)
+     1: invokeinterface iterator() // get iterator — begins for-each loop
+     6: astore_3                   // store iterator in local slot 3
+     7: aload_3
+     8: invokeinterface hasNext()  // ── loop condition check ──
+    13: ifeq   56                  // no more instructions → exit, return NEXT
+
+    16: aload_3
+    17: invokeinterface next()     // fetch next Instruction object
+    22: checkcast Instruction      // (type safety, usually no-op at runtime)
+    27: astore   4                 // store in local slot 4
+
+    29: aload_0                    // this (Interpreter)
+    30: aload   4                  // instruction
+    32: aload_2                    // frame
+    33: invokevirtual execute()    // ── DISPATCH: call execute(instruction, frame) ──
+    36: astore   5                 // store returned ControlSignal
+
+    38: aload   5
+    40: instanceof ControlSignal$Next  // ── check if signal == Next ──
+    45: ifne   7                   // if Next → loop back (goto hasNext check)
+
+    48: aload   5
+    49: areturn                    // early return — propagate Branch or FunctionReturn
+
+    56: getstatic ControlSignal.NEXT   // all instructions consumed → return NEXT
+    59: areturn
+
+  ── ANNOTATED ──────────────────────────────────────────────
+    Lines 7–13:   for-each hasNext() / ifeq — LOOP OVERHEAD (not a dispatch cost,
+                  but present on every iteration)
+    Line  33:     invokevirtual execute() — the actual dispatch call
+    Lines 38–45:  instanceof + ifne — control signal check after each instruction
+                  (necessary for Branch/Return to escape nested Java calls)
+    Line  49:     areturn — early exit when Branch or FunctionReturn seen
+
+  Key: the instanceof check at line 40 is the cost of our
+  "control signal" design. Alternative: exceptions-as-control-flow
+  would skip this check but add try/catch overhead instead.
+==============================================================

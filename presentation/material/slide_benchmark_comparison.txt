@@ -1,0 +1,55 @@
+==============================================================
+ SLIDE: Benchmark — Java Tree-Walking Interpreter vs Node.js/V8 JIT
+ Same .wasm files, same inputs, 10k warmup + 100k measured calls
+==============================================================
+
+Warm-up: 10,000 calls  |  Measure: 100,000 calls
+
+┌─────────────────────────────┬────────────────┬────────────────┬──────────────┐
+│ Function                    │ Java interp.   │ Node.js (V8)   │ Slowdown     │
+│                             │ (µs/call)      │ (µs/call)      │ ≈ overhead   │
+├─────────────────────────────┼────────────────┼────────────────┼──────────────┤
+│ add_with_local(5) → 10      │   0.237 µs     │   0.013 µs     │    ~18×      │
+│ simple_loop(0)   → 45       │   1.451 µs     │   0.028 µs     │    ~52×      │
+│ fibonacci(10)    → 55       │   2.045 µs     │   0.008 µs     │   ~256×      │
+└─────────────────────────────┴────────────────┴────────────────┴──────────────┘
+
+Instruction counts (one call, from ExecutionStats):
+
+  add_with_local   dispatches=  5   operandReads=  6   operandWrites=  5
+  simple_loop      dispatches=137   operandReads=136   operandWrites=114
+  fibonacci        dispatches=183   operandReads=190   operandWrites=160
+
+  operandOps per dispatch ≈ 1.8–2.2  (most instructions need 2 pops + 1 push)
+
+──────────────────────────────────────────────────────────────
+ WHY the slowdown grows with instruction count:
+──────────────────────────────────────────────────────────────
+
+  Node.js / V8 JIT:
+    → Compiles .wasm to native x86 at load time
+    → Result: pure Nutzlast (actual computation only)
+    → add, compare, branch = ~1–3 native instructions each
+
+  Java tree-walking interpreter:
+    → For every single instruction:
+        DISPATCH        typeSwitch(invokedynamic) + tableswitch
+        OPERANDENZUGRIFF  invokevirtual popI32() × N + pushI32() × M
+        NUTZLAST        iadd / isub / ... (the actual work)
+    → Overhead is PER INSTRUCTION, so slowdown scales with dispatch count
+
+  add_with_local:  5 dispatches  → ~18× slower  (base interpreter startup)
+  simple_loop:   137 dispatches  → ~52× slower  (linear scaling)
+  fibonacci:     183 dispatches  → ~256× slower (+ V8 fib JIT is extremely fast)
+
+──────────────────────────────────────────────────────────────
+ Node.js / V8 full results:
+──────────────────────────────────────────────────────────────
+
+  add_with_local(5)   →  10   0.013 µs    74,807,688 calls/s
+  simple_loop(0)      →  45   0.028 µs    36,195,662 calls/s
+  fibonacci(10)       →  55   0.008 µs   128,750,004 calls/s
+  count_primes(100)   →  25   0.330 µs     3,027,222 calls/s
+
+  (count_primes not in Java benchmark — WasmReader doesn't parse its opcodes yet)
+==============================================================

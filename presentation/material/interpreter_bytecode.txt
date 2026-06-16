@@ -1,0 +1,537 @@
+Compiled from "Interpreter.java"
+public final class com.group1.interwasm.runtime.Interpreter {
+  private final com.group1.interwasm.model.FunctionDef function;
+
+  private final com.group1.interwasm.runtime.ExecutionStats stats;
+
+  public com.group1.interwasm.runtime.Interpreter(com.group1.interwasm.model.FunctionDef);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: aconst_null
+         3: invokespecial #1                  // Method "<init>":(Lcom/group1/interwasm/model/FunctionDef;Lcom/group1/interwasm/runtime/ExecutionStats;)V
+         6: return
+
+  public com.group1.interwasm.runtime.Interpreter(com.group1.interwasm.model.FunctionDef, com.group1.interwasm.runtime.ExecutionStats);
+    Code:
+         0: aload_0
+         1: invokespecial #7                  // Method java/lang/Object."<init>":()V
+         4: aload_0
+         5: aload_1
+         6: putfield      #12                 // Field function:Lcom/group1/interwasm/model/FunctionDef;
+         9: aload_0
+        10: aload_2
+        11: putfield      #16                 // Field stats:Lcom/group1/interwasm/runtime/ExecutionStats;
+        14: return
+
+  public com.group1.interwasm.runtime.WasmValue invoke(java.util.List<com.group1.interwasm.runtime.WasmValue>);
+    Code:
+         0: aload_0
+         1: getfield      #16                 // Field stats:Lcom/group1/interwasm/runtime/ExecutionStats;
+         4: ifnull        14
+         7: aload_0
+         8: getfield      #16                 // Field stats:Lcom/group1/interwasm/runtime/ExecutionStats;
+        11: invokevirtual #20                 // Method com/group1/interwasm/runtime/ExecutionStats.reset:()V
+        14: new           #25                 // class com/group1/interwasm/runtime/Frame
+        17: dup
+        18: aload_0
+        19: getfield      #12                 // Field function:Lcom/group1/interwasm/model/FunctionDef;
+        22: aload_1
+        23: aload_0
+        24: getfield      #16                 // Field stats:Lcom/group1/interwasm/runtime/ExecutionStats;
+        27: invokespecial #27                 // Method com/group1/interwasm/runtime/Frame."<init>":(Lcom/group1/interwasm/model/FunctionDef;Ljava/util/List;Lcom/group1/interwasm/runtime/ExecutionStats;)V
+        30: astore_2
+        31: aload_0
+        32: aload_0
+        33: getfield      #12                 // Field function:Lcom/group1/interwasm/model/FunctionDef;
+        36: invokevirtual #30                 // Method com/group1/interwasm/model/FunctionDef.body:()Ljava/util/List;
+        39: aload_2
+        40: invokevirtual #36                 // Method executeBody:(Ljava/util/List;Lcom/group1/interwasm/runtime/Frame;)Lcom/group1/interwasm/runtime/ControlSignal;
+        43: pop
+        44: aload_2
+        45: invokevirtual #40                 // Method com/group1/interwasm/runtime/Frame.operandStack:()Lcom/group1/interwasm/util/OperandStack;
+        48: invokevirtual #44                 // Method com/group1/interwasm/util/OperandStack.pop:()Lcom/group1/interwasm/runtime/WasmValue;
+        51: areturn
+
+  private com.group1.interwasm.runtime.ControlSignal executeBody(java.util.List<com.group1.interwasm.model.Instruction>, com.group1.interwasm.runtime.Frame);
+    Code:
+         0: aload_1
+         1: invokeinterface #50,  1           // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+         6: astore_3
+         7: aload_3
+         8: invokeinterface #56,  1           // InterfaceMethod java/util/Iterator.hasNext:()Z
+        13: ifeq          50
+        16: aload_3
+        17: invokeinterface #62,  1           // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+        22: checkcast     #66                 // class com/group1/interwasm/model/Instruction
+        25: astore        4
+        27: aload_0
+        28: aload         4
+        30: aload_2
+        31: invokevirtual #68                 // Method execute:(Lcom/group1/interwasm/model/Instruction;Lcom/group1/interwasm/runtime/Frame;)Lcom/group1/interwasm/runtime/ControlSignal;
+        34: astore        5
+        36: aload         5
+        38: instanceof    #72                 // class com/group1/interwasm/runtime/ControlSignal$Next
+        41: ifne          47
+        44: aload         5
+        46: areturn
+        47: goto          7
+        50: getstatic     #74                 // Field com/group1/interwasm/runtime/ControlSignal.NEXT:Lcom/group1/interwasm/runtime/ControlSignal;
+        53: areturn
+
+  private com.group1.interwasm.runtime.ControlSignal execute(com.group1.interwasm.model.Instruction, com.group1.interwasm.runtime.Frame);
+    Code:
+         0: aload_0
+         1: getfield      #16                 // Field stats:Lcom/group1/interwasm/runtime/ExecutionStats;
+         4: ifnull        20
+         7: aload_0
+         8: getfield      #16                 // Field stats:Lcom/group1/interwasm/runtime/ExecutionStats;
+        11: dup
+        12: getfield      #80                 // Field com/group1/interwasm/runtime/ExecutionStats.dispatches:J
+        15: lconst_1
+        16: ladd
+        17: putfield      #80                 // Field com/group1/interwasm/runtime/ExecutionStats.dispatches:J
+        20: aload_2
+        21: invokevirtual #40                 // Method com/group1/interwasm/runtime/Frame.operandStack:()Lcom/group1/interwasm/util/OperandStack;
+        24: astore_3
+        25: aload_1
+        26: dup
+        27: invokestatic  #84                 // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;
+        30: pop
+        31: astore        4
+        33: iconst_0
+        34: istore        5
+        36: aload         4
+        38: iload         5
+        40: invokedynamic #90,  0             // InvokeDynamic #0:typeSwitch:(Lcom/group1/interwasm/model/Instruction;I)I
+        45: tableswitch   { // 0 to 24
+                       0: 160
+                       1: 179
+                       2: 203
+                       3: 227
+                       4: 251
+                       5: 313
+                       6: 352
+                       7: 371
+                       8: 398
+                       9: 425
+                      10: 452
+                      11: 479
+                      12: 506
+                      13: 533
+                      14: 556
+                      15: 579
+                      16: 602
+                      17: 699
+                      18: 810
+                      19: 930
+                      20: 950
+                      21: 984
+                      22: 988
+                      23: 991
+                      24: 994
+                 default: 1004
+            }
+       160: aload         4
+       162: checkcast     #94                 // class com/group1/interwasm/instruction/i32/ConstI32
+       165: astore        6
+       167: aload_3
+       168: aload         6
+       170: invokevirtual #96                 // Method com/group1/interwasm/instruction/i32/ConstI32.value:()I
+       173: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       176: goto          1021
+       179: aload_3
+       180: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       183: istore        7
+       185: aload_3
+       186: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       189: istore        8
+       191: aload_3
+       192: iload         8
+       194: iload         7
+       196: iadd
+       197: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       200: goto          1021
+       203: aload_3
+       204: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       207: istore        7
+       209: aload_3
+       210: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       213: istore        8
+       215: aload_3
+       216: iload         8
+       218: iload         7
+       220: isub
+       221: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       224: goto          1021
+       227: aload_3
+       228: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       231: istore        7
+       233: aload_3
+       234: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       237: istore        8
+       239: aload_3
+       240: iload         8
+       242: iload         7
+       244: imul
+       245: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       248: goto          1021
+       251: aload_3
+       252: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       255: istore        7
+       257: aload_3
+       258: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       261: istore        8
+       263: iload         7
+       265: ifne          278
+       268: new           #107                // class java/lang/ArithmeticException
+       271: dup
+       272: ldc           #109                // String integer divide by zero
+       274: invokespecial #111                // Method java/lang/ArithmeticException."<init>":(Ljava/lang/String;)V
+       277: athrow
+       278: iload         8
+       280: ldc           #116                // int -2147483648
+       282: if_icmpne     301
+       285: iload         7
+       287: iconst_m1
+       288: if_icmpne     301
+       291: new           #107                // class java/lang/ArithmeticException
+       294: dup
+       295: ldc           #117                // String integer overflow
+       297: invokespecial #111                // Method java/lang/ArithmeticException."<init>":(Ljava/lang/String;)V
+       300: athrow
+       301: aload_3
+       302: iload         8
+       304: iload         7
+       306: idiv
+       307: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       310: goto          1021
+       313: aload_3
+       314: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       317: istore        7
+       319: aload_3
+       320: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       323: istore        8
+       325: iload         7
+       327: ifne          340
+       330: new           #107                // class java/lang/ArithmeticException
+       333: dup
+       334: ldc           #109                // String integer divide by zero
+       336: invokespecial #111                // Method java/lang/ArithmeticException."<init>":(Ljava/lang/String;)V
+       339: athrow
+       340: aload_3
+       341: iload         8
+       343: iload         7
+       345: irem
+       346: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       349: goto          1021
+       352: aload_3
+       353: aload_3
+       354: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       357: ifne          364
+       360: iconst_1
+       361: goto          365
+       364: iconst_0
+       365: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       368: goto          1021
+       371: aload_3
+       372: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       375: istore        7
+       377: aload_3
+       378: aload_3
+       379: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       382: iload         7
+       384: if_icmpne     391
+       387: iconst_1
+       388: goto          392
+       391: iconst_0
+       392: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       395: goto          1021
+       398: aload_3
+       399: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       402: istore        7
+       404: aload_3
+       405: aload_3
+       406: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       409: iload         7
+       411: if_icmpeq     418
+       414: iconst_1
+       415: goto          419
+       418: iconst_0
+       419: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       422: goto          1021
+       425: aload_3
+       426: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       429: istore        7
+       431: aload_3
+       432: aload_3
+       433: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       436: iload         7
+       438: if_icmpge     445
+       441: iconst_1
+       442: goto          446
+       445: iconst_0
+       446: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       449: goto          1021
+       452: aload_3
+       453: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       456: istore        7
+       458: aload_3
+       459: aload_3
+       460: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       463: iload         7
+       465: if_icmple     472
+       468: iconst_1
+       469: goto          473
+       472: iconst_0
+       473: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       476: goto          1021
+       479: aload_3
+       480: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       483: istore        7
+       485: aload_3
+       486: aload_3
+       487: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       490: iload         7
+       492: if_icmpgt     499
+       495: iconst_1
+       496: goto          500
+       499: iconst_0
+       500: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       503: goto          1021
+       506: aload_3
+       507: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       510: istore        7
+       512: aload_3
+       513: aload_3
+       514: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       517: iload         7
+       519: if_icmplt     526
+       522: iconst_1
+       523: goto          527
+       526: iconst_0
+       527: invokevirtual #100                // Method com/group1/interwasm/util/OperandStack.pushI32:(I)V
+       530: goto          1021
+       533: aload         4
+       535: checkcast     #119                // class com/group1/interwasm/instruction/locals/LocalGet
+       538: astore        7
+       540: aload_3
+       541: aload_2
+       542: aload         7
+       544: invokevirtual #121                // Method com/group1/interwasm/instruction/locals/LocalGet.index:()I
+       547: invokevirtual #124                // Method com/group1/interwasm/runtime/Frame.getLocal:(I)Lcom/group1/interwasm/runtime/WasmValue;
+       550: invokevirtual #128                // Method com/group1/interwasm/util/OperandStack.push:(Lcom/group1/interwasm/runtime/WasmValue;)V
+       553: goto          1021
+       556: aload         4
+       558: checkcast     #132                // class com/group1/interwasm/instruction/locals/LocalSet
+       561: astore        8
+       563: aload_2
+       564: aload         8
+       566: invokevirtual #134                // Method com/group1/interwasm/instruction/locals/LocalSet.index:()I
+       569: aload_3
+       570: invokevirtual #44                 // Method com/group1/interwasm/util/OperandStack.pop:()Lcom/group1/interwasm/runtime/WasmValue;
+       573: invokevirtual #135                // Method com/group1/interwasm/runtime/Frame.setLocal:(ILcom/group1/interwasm/runtime/WasmValue;)V
+       576: goto          1021
+       579: aload         4
+       581: checkcast     #139                // class com/group1/interwasm/instruction/locals/LocalTee
+       584: astore        9
+       586: aload_2
+       587: aload         9
+       589: invokevirtual #141                // Method com/group1/interwasm/instruction/locals/LocalTee.index:()I
+       592: aload_3
+       593: invokevirtual #142                // Method com/group1/interwasm/util/OperandStack.peek:()Lcom/group1/interwasm/runtime/WasmValue;
+       596: invokevirtual #135                // Method com/group1/interwasm/runtime/Frame.setLocal:(ILcom/group1/interwasm/runtime/WasmValue;)V
+       599: goto          1021
+       602: aload         4
+       604: checkcast     #145                // class com/group1/interwasm/instruction/control_flow/Block
+       607: astore        10
+       609: aload_3
+       610: invokevirtual #147                // Method com/group1/interwasm/util/OperandStack.size:()I
+       613: istore        11
+       615: aload_0
+       616: aload         10
+       618: invokevirtual #150                // Method com/group1/interwasm/instruction/control_flow/Block.body:()Ljava/util/List;
+       621: aload_2
+       622: invokevirtual #36                 // Method executeBody:(Ljava/util/List;Lcom/group1/interwasm/runtime/Frame;)Lcom/group1/interwasm/runtime/ControlSignal;
+       625: astore        12
+       627: aload         12
+       629: instanceof    #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       632: ifeq          660
+       635: aload         12
+       637: checkcast     #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       640: astore        13
+       642: aload         13
+       644: invokevirtual #153                // Method com/group1/interwasm/runtime/ControlSignal$Branch.depth:()I
+       647: ifne          660
+       650: aload_3
+       651: iload         11
+       653: invokevirtual #156                // Method com/group1/interwasm/util/OperandStack.truncateTo:(I)V
+       656: getstatic     #74                 // Field com/group1/interwasm/runtime/ControlSignal.NEXT:Lcom/group1/interwasm/runtime/ControlSignal;
+       659: areturn
+       660: aload         12
+       662: instanceof    #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       665: ifeq          696
+       668: aload         12
+       670: checkcast     #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       673: astore        14
+       675: aload_3
+       676: iload         11
+       678: invokevirtual #156                // Method com/group1/interwasm/util/OperandStack.truncateTo:(I)V
+       681: new           #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       684: dup
+       685: aload         14
+       687: invokevirtual #153                // Method com/group1/interwasm/runtime/ControlSignal$Branch.depth:()I
+       690: iconst_1
+       691: isub
+       692: invokespecial #159                // Method com/group1/interwasm/runtime/ControlSignal$Branch."<init>":(I)V
+       695: areturn
+       696: aload         12
+       698: areturn
+       699: aload         4
+       701: checkcast     #161                // class com/group1/interwasm/instruction/control_flow/Loop
+       704: astore        11
+       706: aload_3
+       707: invokevirtual #147                // Method com/group1/interwasm/util/OperandStack.size:()I
+       710: istore        12
+       712: aload_0
+       713: aload         11
+       715: invokevirtual #163                // Method com/group1/interwasm/instruction/control_flow/Loop.body:()Ljava/util/List;
+       718: aload_2
+       719: invokevirtual #36                 // Method executeBody:(Ljava/util/List;Lcom/group1/interwasm/runtime/Frame;)Lcom/group1/interwasm/runtime/ControlSignal;
+       722: astore        13
+       724: aload         13
+       726: instanceof    #72                 // class com/group1/interwasm/runtime/ControlSignal$Next
+       729: ifeq          736
+       732: getstatic     #74                 // Field com/group1/interwasm/runtime/ControlSignal.NEXT:Lcom/group1/interwasm/runtime/ControlSignal;
+       735: areturn
+       736: aload         13
+       738: instanceof    #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       741: ifeq          768
+       744: aload         13
+       746: checkcast     #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       749: astore        14
+       751: aload         14
+       753: invokevirtual #153                // Method com/group1/interwasm/runtime/ControlSignal$Branch.depth:()I
+       756: ifne          768
+       759: aload_3
+       760: iload         12
+       762: invokevirtual #156                // Method com/group1/interwasm/util/OperandStack.truncateTo:(I)V
+       765: goto          807
+       768: aload         13
+       770: instanceof    #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       773: ifeq          804
+       776: aload         13
+       778: checkcast     #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       781: astore        15
+       783: aload_3
+       784: iload         12
+       786: invokevirtual #156                // Method com/group1/interwasm/util/OperandStack.truncateTo:(I)V
+       789: new           #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       792: dup
+       793: aload         15
+       795: invokevirtual #153                // Method com/group1/interwasm/runtime/ControlSignal$Branch.depth:()I
+       798: iconst_1
+       799: isub
+       800: invokespecial #159                // Method com/group1/interwasm/runtime/ControlSignal$Branch."<init>":(I)V
+       803: areturn
+       804: aload         13
+       806: areturn
+       807: goto          712
+       810: aload         4
+       812: checkcast     #164                // class com/group1/interwasm/instruction/control_flow/If
+       815: astore        12
+       817: aload_3
+       818: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       821: istore        13
+       823: aload_3
+       824: invokevirtual #147                // Method com/group1/interwasm/util/OperandStack.size:()I
+       827: istore        14
+       829: iload         13
+       831: ifeq          842
+       834: aload         12
+       836: invokevirtual #166                // Method com/group1/interwasm/instruction/control_flow/If.thenBody:()Ljava/util/List;
+       839: goto          847
+       842: aload         12
+       844: invokevirtual #169                // Method com/group1/interwasm/instruction/control_flow/If.elseBody:()Ljava/util/List;
+       847: astore        15
+       849: aload_0
+       850: aload         15
+       852: aload_2
+       853: invokevirtual #36                 // Method executeBody:(Ljava/util/List;Lcom/group1/interwasm/runtime/Frame;)Lcom/group1/interwasm/runtime/ControlSignal;
+       856: astore        16
+       858: aload         16
+       860: instanceof    #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       863: ifeq          891
+       866: aload         16
+       868: checkcast     #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       871: astore        17
+       873: aload         17
+       875: invokevirtual #153                // Method com/group1/interwasm/runtime/ControlSignal$Branch.depth:()I
+       878: ifne          891
+       881: aload_3
+       882: iload         14
+       884: invokevirtual #156                // Method com/group1/interwasm/util/OperandStack.truncateTo:(I)V
+       887: getstatic     #74                 // Field com/group1/interwasm/runtime/ControlSignal.NEXT:Lcom/group1/interwasm/runtime/ControlSignal;
+       890: areturn
+       891: aload         16
+       893: instanceof    #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       896: ifeq          927
+       899: aload         16
+       901: checkcast     #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       904: astore        18
+       906: aload_3
+       907: iload         14
+       909: invokevirtual #156                // Method com/group1/interwasm/util/OperandStack.truncateTo:(I)V
+       912: new           #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       915: dup
+       916: aload         18
+       918: invokevirtual #153                // Method com/group1/interwasm/runtime/ControlSignal$Branch.depth:()I
+       921: iconst_1
+       922: isub
+       923: invokespecial #159                // Method com/group1/interwasm/runtime/ControlSignal$Branch."<init>":(I)V
+       926: areturn
+       927: aload         16
+       929: areturn
+       930: aload         4
+       932: checkcast     #172                // class com/group1/interwasm/instruction/control_flow/Br
+       935: astore        13
+       937: new           #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       940: dup
+       941: aload         13
+       943: invokevirtual #174                // Method com/group1/interwasm/instruction/control_flow/Br.labelIndex:()I
+       946: invokespecial #159                // Method com/group1/interwasm/runtime/ControlSignal$Branch."<init>":(I)V
+       949: areturn
+       950: aload         4
+       952: checkcast     #177                // class com/group1/interwasm/instruction/control_flow/BrIf
+       955: astore        14
+       957: aload_3
+       958: invokevirtual #104                // Method com/group1/interwasm/util/OperandStack.popI32:()I
+       961: istore        15
+       963: iload         15
+       965: ifeq          981
+       968: new           #151                // class com/group1/interwasm/runtime/ControlSignal$Branch
+       971: dup
+       972: aload         14
+       974: invokevirtual #179                // Method com/group1/interwasm/instruction/control_flow/BrIf.labelIndex:()I
+       977: invokespecial #159                // Method com/group1/interwasm/runtime/ControlSignal$Branch."<init>":(I)V
+       980: areturn
+       981: goto          1021
+       984: getstatic     #180                // Field com/group1/interwasm/runtime/ControlSignal.RETURN:Lcom/group1/interwasm/runtime/ControlSignal;
+       987: areturn
+       988: goto          1021
+       991: goto          1021
+       994: new           #183                // class java/lang/RuntimeException
+       997: dup
+       998: ldc           #185                // String unreachable
+      1000: invokespecial #187                // Method java/lang/RuntimeException."<init>":(Ljava/lang/String;)V
+      1003: athrow
+      1004: new           #188                // class java/lang/UnsupportedOperationException
+      1007: dup
+      1008: aload_1
+      1009: invokestatic  #190                // Method java/lang/String.valueOf:(Ljava/lang/Object;)Ljava/lang/String;
+      1012: invokedynamic #196,  0            // InvokeDynamic #1:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+      1017: invokespecial #200                // Method java/lang/UnsupportedOperationException."<init>":(Ljava/lang/String;)V
+      1020: athrow
+      1021: getstatic     #74                 // Field com/group1/interwasm/runtime/ControlSignal.NEXT:Lcom/group1/interwasm/runtime/ControlSignal;
+      1024: areturn
+}

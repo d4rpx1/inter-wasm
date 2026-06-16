@@ -1,0 +1,15 @@
+=== Java tree-walking interpreter benchmark ===
+
+Warm-up: 10,000 calls  |  Measure: 100,000 calls
+
+add_with_local(5)              input=    5  result=    10     0.237 µs/call     4,227,803 calls/s
+  └─ dispatches=5       operandReads=6       operandWrites=5       operandOps/dispatch=2.20
+
+simple_loop(0)                 input=    0  result=    45     1.451 µs/call       689,098 calls/s
+  └─ dispatches=137     operandReads=136     operandWrites=114     operandOps/dispatch=1.82
+
+fibonacci(10)                  input=   10  result=    55     2.045 µs/call       488,965 calls/s
+  └─ dispatches=183     operandReads=190     operandWrites=160     operandOps/dispatch=1.91
+
+Compare µs/call against Node.js (node benchmark.js).
+The ratio ≈ total interpreter overhead (Dispatch + Operandenzugriff).
