@@ -11,11 +11,17 @@ public final class Frame {
     private final FunctionDef function;
     private final List<WasmValue> locals;
     private final OperandStack operandStack;
+    private final ExecutionStats stats;
 
     public Frame(FunctionDef function, List<WasmValue> args) {
+        this(function, args, null);
+    }
+
+    public Frame(FunctionDef function, List<WasmValue> args, ExecutionStats stats) {
         this.function = function;
+        this.stats = stats;
         this.locals = new ArrayList<>();
-        this.operandStack = new OperandStack();
+        this.operandStack = new OperandStack(stats);
 
         for (WasmValue arg : args) {
             locals.add(arg);
@@ -35,11 +41,13 @@ public final class Frame {
 
     public WasmValue getLocal(int index) {
         checkLocalIndex(index);
+        if (stats != null) stats.operandReads++;
         return locals.get(index);
     }
 
     public void setLocal(int index, WasmValue value) {
         checkLocalIndex(index);
+        if (stats != null) stats.operandWrites++;
 
         ValueType expectedType = localType(index);
         if (value.type() != expectedType) {

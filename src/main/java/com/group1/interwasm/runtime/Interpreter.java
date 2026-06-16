@@ -11,21 +11,23 @@ import com.group1.interwasm.util.OperandStack;
 
 import java.util.List;
 
-/**
- * Interpreter for one single function
- */
 public final class Interpreter {
     private final FunctionDef function;
+    private final ExecutionStats stats;
 
     public Interpreter(FunctionDef functionDef) {
+        this(functionDef, null);
+    }
+
+    public Interpreter(FunctionDef functionDef, ExecutionStats stats) {
         this.function = functionDef;
+        this.stats = stats;
     }
 
     public WasmValue invoke(List<WasmValue> args) {
-        Frame frame = new Frame(function, args);
-
+        if (stats != null) stats.reset();
+        Frame frame = new Frame(function, args, stats);
         executeBody(function.body(), frame);
-
         return frame.operandStack().pop();
     }
 
@@ -40,7 +42,7 @@ public final class Interpreter {
     }
 
     private ControlSignal execute(Instruction instruction, Frame frame) {
-        
+        if (stats != null) stats.dispatches++;
         OperandStack stack = frame.operandStack();
 
         switch (instruction) {
@@ -144,9 +146,7 @@ public final class Interpreter {
             case Nop _ -> { /* no-op */ }
             case Unreachable _ -> throw new RuntimeException("unreachable");
 
-            default -> throw new UnsupportedOperationException(
-                    "Unsupported instruction: " + instruction
-            );
+            default -> throw new UnsupportedOperationException("Unsupported instruction: " + instruction);
         }
 
         return ControlSignal.NEXT;

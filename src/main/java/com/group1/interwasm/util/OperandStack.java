@@ -1,5 +1,6 @@
 package com.group1.interwasm.util;
 
+import com.group1.interwasm.runtime.ExecutionStats;
 import com.group1.interwasm.runtime.WasmValue;
 
 import java.util.ArrayDeque;
@@ -7,8 +8,16 @@ import java.util.Deque;
 
 public final class OperandStack {
     private final Deque<WasmValue> values = new ArrayDeque<>();
+    private ExecutionStats stats;
+
+    public OperandStack() {}
+
+    public OperandStack(ExecutionStats stats) {
+        this.stats = stats;
+    }
 
     public void push(WasmValue value) {
+        if (stats != null) stats.operandWrites++;
         values.push(value);
     }
 
@@ -16,7 +25,7 @@ public final class OperandStack {
         if (values.isEmpty()) {
             throw new IllegalArgumentException("Operand stack underflow");
         }
-
+        if (stats != null) stats.operandReads++;
         return values.pop();
     }
 
@@ -24,7 +33,7 @@ public final class OperandStack {
         if (values.isEmpty()) {
             throw new IllegalArgumentException("Operand stack underflow");
         }
-
+        if (stats != null) stats.operandReads++;
         return values.peek();
     }
 
