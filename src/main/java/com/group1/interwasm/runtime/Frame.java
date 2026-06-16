@@ -17,7 +17,12 @@ public final class Frame {
         this.locals = new ArrayList<>();
         this.operandStack = new OperandStack();
 
-        // TODO: initialize function arguments
+        for (WasmValue arg : args) {
+            locals.add(arg);
+        }
+        for (ValueType type : function.locals()) {
+            locals.add(WasmValue.defaultValue(type));
+        }
     }
 
     public FunctionDef function() {
