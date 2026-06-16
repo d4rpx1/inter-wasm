@@ -51,4 +51,10 @@ public final class OperandStack {
     public void clear() {
         values.clear();
     }
+
+    public void truncateTo(int size) {
+        while (values.size() > size) {
+            values.pop();
+        }
+    }
 }
