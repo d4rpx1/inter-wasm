@@ -40,7 +40,7 @@ class MainTest {
         WasmValue returnVal = funcdefReturn.get();
 
         assertEquals(ValueType.I32, returnVal.type());
-        assertEquals(10, returnVal.i32()); // basically add_with_local adds 5 to the first parameter
+        assertEquals(15, returnVal.i32()); // add compiled by clang adds 10 to the first parameter
     }
 
     @Test
@@ -56,7 +56,7 @@ class MainTest {
         WasmValue returnVal = funcdefReturn.get();
 
         assertEquals(ValueType.I32, returnVal.type());
-        assertEquals(10, returnVal.i32()); // basically add_with_local adds 5 to the first parameter
+        assertEquals(50, returnVal.i32()); // simple_loop(5) returns 50
     }
 
     @Test
@@ -72,7 +72,7 @@ class MainTest {
         WasmValue returnVal = funcdefReturn.get();
 
         assertEquals(ValueType.I32, returnVal.type());
-        assertEquals(10, returnVal.i32()); // basically add_with_local adds 5 to the first parameter
+        assertEquals(5, returnVal.i32()); // fibonacci(5) = 5
     }
 
     @Test
@@ -88,6 +88,6 @@ class MainTest {
         WasmValue returnVal = funcdefReturn.get();
 
         assertEquals(ValueType.I32, returnVal.type());
-        assertEquals(10, returnVal.i32()); // basically add_with_local adds 5 to the first parameter
+        assertEquals(3, returnVal.i32()); // primes up to 5 are {2, 3, 5} = 3 primes
     }
 }
