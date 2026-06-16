@@ -1,0 +1,308 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║         WebAssembly Tree-Walking Interpreter — Presentation Summary         ║
+║         Abstrakte Maschinen — TU Wien                                        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 1 — Architecture: What we built
+══════════════════════════════════════════════════════════════════════════════
+
+ Input:  WebAssembly .wasm binary
+          │
+          ▼
+ WasmReader  →  FunctionDef (AST: List<Instruction>)
+          │
+          ▼
+ Interpreter.invoke(args)
+   └── executeBody(List<Instruction>)       ← recursive tree walk
+         └── execute(Instruction)           ← pattern match per instruction
+               ├── OperandStack (ArrayDeque<WasmValue>)
+               └── Frame (locals: List<WasmValue>)
+
+ Key characteristic: NO compilation step.
+ Each WebAssembly instruction is a Java object (sealed record).
+ We visit the AST every single call — hence "tree-walking".
+
+ Instruction subset implemented (25 cases):
+   i32.const   i32.add   i32.sub   i32.mul   i32.div_s  i32.rem_s
+   i32.eqz     i32.eq    i32.ne    i32.lt_s  i32.gt_s   i32.le_s  i32.ge_s
+   local.get   local.set  local.tee
+   block       loop       if
+   br          br_if      return
+   nop         unreachable  end
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 2 — The three cost categories (from course slide 17)
+══════════════════════════════════════════════════════════════════════════════
+
+ Every instruction execution pays three costs:
+
+ ┌──────────────────┬───────────────────────────────────────────────────────┐
+ │ DISPATCH   (red) │ "Which instruction is this? Jump to its handler."     │
+ │                  │ In our interpreter: typeSwitch + tableswitch           │
+ ├──────────────────┼───────────────────────────────────────────────────────┤
+ │ OPERANDEN- (blue)│ "Read inputs from stack/locals, write output back."   │
+ │ ZUGRIFF          │ In our interpreter: invokevirtual popI32/pushI32       │
+ │                  │ + WasmValue heap allocation per value                  │
+ ├──────────────────┼───────────────────────────────────────────────────────┤
+ │ NUTZLAST   (grn) │ "Do the actual computation."                          │
+ │                  │ In our interpreter: iadd / isub / imul / …            │
+ └──────────────────┴───────────────────────────────────────────────────────┘
+
+ Nutzlast is the same in any interpreter — it's what the user's program
+ actually needs. Dispatch and Operandenzugriff are pure overhead.
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 3 — JVM bytecode: executeBody() — the dispatch loop
+══════════════════════════════════════════════════════════════════════════════
+
+ Source:
+   for (Instruction instruction : body) {
+       ControlSignal signal = execute(instruction, frame);
+       if (!(signal instanceof ControlSignal.Next)) return signal;
+   }
+
+ javap -p -c Interpreter.class (method executeBody):
+
+    1: invokeinterface List.iterator()          ← allocates Iterator object
+    8: invokeinterface Iterator.hasNext()       ─┐ loop condition
+   13: ifeq          50                          │
+   17: invokeinterface Iterator.next()           │ fetch next instruction
+   31: invokevirtual execute()          ◄─────── │ THE DISPATCH CALL
+   38: instanceof  ControlSignal$Next            │ check signal type
+   41: ifne          47                          │ if Next → continue
+   44: areturn                          ← early return (Branch/Return signal)
+   47: goto           7                ─┘ next iteration
+
+ Cost per instruction:
+   • 2× invokeinterface  (hasNext + next)   — loop overhead
+   • 1× invokevirtual    (execute)           — dispatch overhead
+   • 1× instanceof       (signal check)      — control-flow overhead
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 4 — JVM bytecode: execute() — dispatch mechanism
+══════════════════════════════════════════════════════════════════════════════
+
+ Source:
+   switch (instruction) {
+       case ConstI32 c -> ...
+       case I32Add _ -> ...
+       ...
+   }
+
+ javap output (execute(), offset 36–133):
+
+   36: aload         4              // load instruction object
+   40: invokedynamic #90            // typeSwitch(instruction, index) → int
+                                   //   Java 21 sealed interface pattern match
+                                   //   checks instanceof for each subtype
+   45: tableswitch   { // 0 to 24  // O(1) jump table (like C's switch)
+                  0: 160            //   → ConstI32
+                  1: 179            //   → I32Add
+                  2: 203            //   → I32Sub
+                  3: 227            //   → I32Mul
+                  ...
+                 24: 994            //   → Unreachable
+            default: 1004           //   → UnsupportedOperationException
+       }
+
+ ✓ DISPATCH is O(1): typeSwitch maps sealed subtype → int, tableswitch jumps.
+   This is the same as a C switch() on an opcode byte.
+   25 instruction types → 25 table entries → constant-time dispatch.
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 5 — JVM bytecode: I32Add case — all three categories visible
+══════════════════════════════════════════════════════════════════════════════
+
+ Source:
+   case I32Add _ -> {
+       int b = stack.popI32();
+       int a = stack.popI32();
+       stack.pushI32(a + b);
+   }
+
+ javap output (offsets 179–200):
+
+   ── DISPATCH ──────────────────────────────────────────────────
+   (tableswitch jumped here from offset 45 — dispatch already done)
+
+   ── OPERANDENZUGRIFF ──────────────────────────────────────────
+   179: aload_3                           // load OperandStack ref
+   180: invokevirtual popI32()            // pop b  ← virtual dispatch
+                                          //          + ArrayDeque.pop()
+                                          //          + WasmValue.asI32()
+   183: istore        7                   // b → JVM local slot
+   185: aload_3
+   186: invokevirtual popI32()            // pop a  ← same overhead
+   189: istore        8                   // a → JVM local slot
+   191: aload_3                           // load OperandStack ref (for push)
+   192: iload         8                   // load a
+   194: iload         7                   // load b
+
+   ── NUTZLAST ──────────────────────────────────────────────────
+   196: iadd                              // ← THE ACTUAL WORK (1 opcode)
+
+   ── OPERANDENZUGRIFF (write back) ────────────────────────────
+   197: invokevirtual pushI32()           // push result ← virtual dispatch
+                                          //               + ArrayDeque.push()
+                                          //               + new WasmValue(I32, v)
+   200: goto          1021                // back to executeBody loop
+
+ COUNT:
+   Dispatch:           1 typeSwitch + 1 tableswitch jump
+   Operandenzugriff:   3× invokevirtual  +  heap-alloc WasmValue per value
+   Nutzlast:           1× iadd
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 6 — Comparison: our overhead vs C interpreter
+══════════════════════════════════════════════════════════════════════════════
+
+ For i32.add (a + b → result):
+
+ ┌─────────────────┬──────────────────────────┬─────────────────────────────┐
+ │                 │ C switch interpreter      │ Our Java interpreter        │
+ ├─────────────────┼──────────────────────────┼─────────────────────────────┤
+ │ DISPATCH        │ switch(opcode) → O(1)    │ typeSwitch + tableswitch    │
+ │                 │ 1 compare + 1 jump        │ ≈ same cost, O(1)      ✓   │
+ ├─────────────────┼──────────────────────────┼─────────────────────────────┤
+ │ OPERANDEN-      │ sp[1] += sp[0]; sp--;    │ 3× invokevirtual            │
+ │ ZUGRIFF         │ ~3 native instructions   │ + new WasmValue() heap alloc│
+ │                 │ direct int[] access       │ GC pressure                 │
+ │                 │                           │ much more expensive      ✗  │
+ ├─────────────────┼──────────────────────────┼─────────────────────────────┤
+ │ NUTZLAST        │ addl (1 native insn)     │ iadd (1 JVM bytecode)       │
+ │                 │                           │ ≈ same after JIT       ✓   │
+ └─────────────────┴──────────────────────────┴─────────────────────────────┘
+
+ The main cost difference is Operandenzugriff:
+   C uses a plain int[] with a pointer — array access = ~1 ns.
+   Java boxes every i32 into a WasmValue record on the heap and uses
+   virtual dispatch on ArrayDeque to access it.
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 7 — Optimization: Interpreter2
+══════════════════════════════════════════════════════════════════════════════
+
+ Three changes, zero semantic difference:
+
+ ① int[] stack + int sp   (instead of ArrayDeque<WasmValue>)
+
+   Before:  stack.popI32()    → invokevirtual × 3 + new WasmValue()
+   After:   stack[sp--]       → iaload (array read)  — zero allocation
+
+ ② int[] locals            (instead of List<WasmValue>)
+
+   Before:  frame.getLocal(i)  → invokevirtual + bounds check + asI32()
+   After:   locals[i]          → iaload
+
+ ③ int signal encoding     (instead of ControlSignal records)
+
+   Before:  return new ControlSignal.Branch(depth)  → heap allocation per br
+   After:   return depth + 1                         → int literal
+
+ ④ In-place binary ops     (instead of pop+pop+push)
+
+   Before:  int b = stack.popI32(); int a = stack.popI32(); stack.pushI32(a+b);
+   After:   stack[sp-1] += stack[sp]; sp--;
+            // 1 array write + 1 decrement vs 3 array accesses
+
+ Interpreter2 source (I32Add):
+   case I32Add _ -> { stack[sp - 1] += stack[sp]; sp--; }
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 8 — Benchmark results
+══════════════════════════════════════════════════════════════════════════════
+
+ Same .wasm programs, same inputs, 10k warmup + 100k measured calls.
+ Java: tree-walking interpreter (Interpreter and Interpreter2)
+ Node.js: V8 JIT-compiles .wasm to native x86 at load time
+
+ ┌──────────────────────┬──────────────┬──────────────┬─────────────┬───────┬───────┐
+ │ Function             │ Interp.(µs)  │ Interp2.(µs) │ V8 JIT (µs) │ v1→v2 │ v2→V8 │
+ ├──────────────────────┼──────────────┼──────────────┼─────────────┼───────┼───────┤
+ │ add_with_local → 10  │    0.19 µs   │    0.12 µs   │   0.012 µs  │  1.6× │  10×  │
+ │ simple_loop    → 45  │    1.45 µs   │    0.92 µs   │   0.029 µs  │  1.6× │  32×  │
+ │ fibonacci(10)  → 55  │    1.94 µs   │    1.11 µs   │   0.008 µs  │  1.7× │ 139×  │
+ └──────────────────────┴──────────────┴──────────────┴─────────────┴───────┴───────┘
+
+ Instruction counts (Interpreter, one call):
+   add_with_local:   5 dispatches    6 operandReads    5 operandWrites
+   simple_loop:    137 dispatches  136 operandReads  114 operandWrites
+   fibonacci(10):  183 dispatches  190 operandReads  160 operandWrites
+
+   operandOps per dispatch ≈ 1.8–2.2  (most instructions: 2 pops + 1 push)
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 9 — Analysis: why the gap grows with instruction count
+══════════════════════════════════════════════════════════════════════════════
+
+ v1→v2 speedup (1.6–1.7×) is roughly constant across all functions.
+   → Operandenzugriff overhead is proportional to instruction count,
+     so eliminating it scales linearly. Gain is real but bounded.
+
+ v2→V8 gap (10× → 32× → 139×) grows steeply with instruction count.
+   → V8 has ~zero per-instruction overhead (native code = Nutzlast only).
+   → Our Interpreter2 still pays per instruction:
+       • invokevirtual execute() (tree dispatch)
+       • invokeinterface hasNext() + next() (Iterator per executeBody call)
+       • instanceof + branch (control signal check after each instruction)
+   → Each of these multiplies with dispatch count → slowdown is additive per
+     instruction but appears multiplicative in the total ratio.
+
+ fibonacci is the extreme case: V8 JIT is so fast (~0.008 µs) because
+ fib(10) is very short-lived native code that fits entirely in CPU L1 cache.
+ Our interpreter overhead dominates.
+
+ Node.js / V8:
+   Compile .wasm → native x86 once at load time.
+   Execution = pure Nutzlast. No dispatch overhead, no boxing.
+   Effectively a compiled language at runtime.
+
+
+══════════════════════════════════════════════════════════════════════════════
+ SLIDE 10 — What would close the remaining gap?
+══════════════════════════════════════════════════════════════════════════════
+
+ Current remaining overhead after Interpreter2:
+   • Recursive executeBody() calls for block/loop/if
+   • Iterator object allocated per executeBody call
+   • invokevirtual execute() on each instruction
+   • instanceof signal check after each instruction
+   • typeSwitch invokedynamic on each instruction
+
+ Next optimization: Bytecode-threaded interpreter
+   → Compile AST to a flat int[] program once (like a bytecode)
+   → Execute with: while (pc < len) { switch(code[pc++]) { ... } }
+   → Eliminates: Iterator, recursive calls, object dispatch
+   → This is how CPython and the JVM itself work
+
+ After that: Direct-threaded interpreter (C only)
+   → Replace switch with an array of function pointers / computed gotos
+   → Eliminates: even the switch dispatch
+   → Not possible in Java (no computed goto)
+
+ Ultimate: JIT compilation (what V8 does)
+   → Translate WASM → native machine code at load time
+   → Execution = pure Nutzlast
+   → Gap to V8 goes to ~1× (some overhead for call convention, etc.)
+
+
+══════════════════════════════════════════════════════════════════════════════
+ KEY NUMBERS TO REMEMBER
+══════════════════════════════════════════════════════════════════════════════
+
+  25      sealed instruction types → O(1) tableswitch dispatch
+  3×      invokevirtual per arithmetic op (Operandenzugriff bottleneck)
+  1.6×    speedup from int[] + in-place ops (Interpreter2)
+  10–139× remaining gap to V8 JIT (scales with instruction count)
+  97      tests — both interpreters verified identical semantics
+
+══════════════════════════════════════════════════════════════════════════════

@@ -10,9 +10,15 @@ import com.group1.interwasm.model.FunctionType;
 import com.group1.interwasm.model.ValueType;
 import com.group1.interwasm.runtime.ExecutionStats;
 import com.group1.interwasm.runtime.Interpreter;
+import com.group1.interwasm.runtime.Interpreter2;
 import com.group1.interwasm.runtime.WasmValue;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Java interpreter benchmark -> compare against benchmark.js (Node.js / V8 JIT).
@@ -97,19 +103,28 @@ public class Benchmark {
 
     //  Benchmark runner 
 
-    static void bench(String label, FunctionDef fn, int input, int warmup, int measure) {
+    static double timeInterpreter(FunctionDef fn, int input, int warmup, int measure) {
         Interpreter interp = new Interpreter(fn);
+<<<<<<< Updated upstream
 
         // Warm up -> lets the JVM JIT-compile the interpreter itself
+=======
+>>>>>>> Stashed changes
         for (int i = 0; i < warmup; i++) interp.invoke(List.of(WasmValue.i32(input)));
-
         long t0 = System.nanoTime();
         for (int i = 0; i < measure; i++) interp.invoke(List.of(WasmValue.i32(input)));
-        long ns = System.nanoTime() - t0;
+        return (double)(System.nanoTime() - t0) / measure / 1000.0;
+    }
 
-        double usPerCall  = (double) ns / measure / 1000.0;
-        double callsPerSec = 1e9 / ((double) ns / measure);
+    static double timeInterpreter2(FunctionDef fn, int input, int warmup, int measure) {
+        Interpreter2 interp = new Interpreter2(fn);
+        for (int i = 0; i < warmup; i++) interp.invoke(List.of(WasmValue.i32(input)));
+        long t0 = System.nanoTime();
+        for (int i = 0; i < measure; i++) interp.invoke(List.of(WasmValue.i32(input)));
+        return (double)(System.nanoTime() - t0) / measure / 1000.0;
+    }
 
+<<<<<<< Updated upstream
         // Collect stats for one representative call
         ExecutionStats stats = new ExecutionStats();
         Interpreter statsInterp = new Interpreter(fn, stats);
@@ -122,17 +137,83 @@ public class Benchmark {
         System.out.printf("  └ dispatches=%-6d  operandReads=%-6d  operandWrites=%-6d  operandOps/dispatch=%.2f%n%n",
                 stats.dispatches, stats.operandReads, stats.operandWrites,
                 stats.dispatches == 0 ? 0.0 : (double) stats.totalOperandOps() / stats.dispatches);
+=======
+    /** Spawns `node benchmark.js` and parses "label ... X.XXX µs/call" lines. */
+    static Map<String, Double> runNodeBenchmark() {
+        Map<String, Double> results = new LinkedHashMap<>();
+        try {
+            Process proc = new ProcessBuilder("node", "benchmark.js")
+                    .directory(new File("."))
+                    .redirectErrorStream(true)
+                    .start();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (!line.contains("µs/call")) continue;
+                    String[] parts = line.trim().split("\\s+");
+                    String label = parts[0];
+                    for (int i = 0; i < parts.length; i++) {
+                        if (parts[i].equals("µs/call")) {
+                            results.put(label, Double.parseDouble(parts[i - 1]));
+                            break;
+                        }
+                    }
+                }
+            }
+            proc.waitFor();
+        } catch (Exception e) {
+            System.err.println("Warning: could not run node benchmark.js — " + e.getMessage());
+        }
+        return results;
+>>>>>>> Stashed changes
     }
 
     public static void main(String[] args) {
-        System.out.println("=== Java tree-walking interpreter benchmark ===\n");
-        System.out.println("Warm-up: 10,000 calls  |  Measure: 100,000 calls\n");
+        final int WARMUP = 10_000, MEASURE = 100_000;
 
-        bench("add_with_local(5)",  addWithLocal(),  5,  10_000, 100_000);
-        bench("simple_loop(0)",     simpleLoop(),    0,  10_000, 100_000);
-        bench("fibonacci(10)",      fibonacci(),     10, 10_000, 100_000);
+        record Case(String label, FunctionDef fn, int input, int result) {}
+        List<Case> cases = List.of(
+                new Case("add_with_local(5)",  addWithLocal(),  5,  10),
+                new Case("simple_loop(0)",     simpleLoop(),    0,  45),
+                new Case("fibonacci(10)",      fibonacci(),    10,  55)
+        );
 
-        System.out.println("Compare µs/call against Node.js (node benchmark.js).");
-        System.out.println("The ratio ≈ total interpreter overhead (Dispatch + Operandenzugriff).");
+        System.out.println("Warming up and measuring Java interpreters...");
+        double[] us1 = new double[cases.size()];
+        double[] us2 = new double[cases.size()];
+        for (int i = 0; i < cases.size(); i++) {
+            Case c = cases.get(i);
+            us1[i] = timeInterpreter(c.fn(), c.input(), WARMUP, MEASURE);
+            us2[i] = timeInterpreter2(c.fn(), c.input(), WARMUP, MEASURE);
+        }
+
+        System.out.println("Running Node.js/V8 benchmark...");
+        Map<String, Double> node = runNodeBenchmark();
+
+        System.out.println();
+        System.out.println("=== WebAssembly VM comparison: tree-walking interpreter vs V8 JIT ===");
+        System.out.println("  Warm-up: 10,000 calls  |  Measure: 100,000 calls\n");
+
+        String sep = "─".repeat(86);
+        System.out.println(sep);
+        System.out.printf("  %-22s │ %11s │ %11s │ %11s │ %8s │ %8s%n",
+                "Function", "Interp. (µs)", "Interp2 (µs)", "V8 JIT (µs)", "v1→v2", "v2→V8");
+        System.out.println(sep);
+
+        for (int i = 0; i < cases.size(); i++) {
+            Case c = cases.get(i);
+            Double nodeUs = node.get(c.label());
+            String nodeStr  = nodeUs != null ? String.format("%11.3f", nodeUs) : "        N/A";
+            String v2vsV8   = nodeUs != null ? String.format("%7.1f×", us2[i] / nodeUs) : "      N/A";
+            System.out.printf("  %-22s │ %11.3f │ %11.3f │ %s │ %7.1f× │ %s%n",
+                    c.label() + " →" + c.result(),
+                    us1[i], us2[i], nodeStr,
+                    us1[i] / us2[i], v2vsV8);
+        }
+        System.out.println(sep);
+        System.out.println();
+        System.out.println("  v1→v2  : speedup from int[] stack/locals + in-place ops (eliminates invokevirtual + heap alloc)");
+        System.out.println("  v2→V8  : remaining gap = tree dispatch overhead (recursive executeBody + Iterator + typeSwitch)");
+        System.out.println("           V8 JIT compiles .wasm to native — essentially pure Nutzlast, no interpreter overhead");
     }
 }

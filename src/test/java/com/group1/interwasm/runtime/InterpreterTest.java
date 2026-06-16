@@ -1,10 +1,7 @@
 package com.group1.interwasm.runtime;
 
-import com.group1.interwasm.instruction.arithmetic.*;
-import com.group1.interwasm.instruction.comparisons.*;
-import com.group1.interwasm.instruction.control_flow.*;
 import com.group1.interwasm.instruction.i32.ConstI32;
-import com.group1.interwasm.instruction.locals.*;
+import com.group1.interwasm.instruction.locals.LocalGet;
 import com.group1.interwasm.model.FunctionDef;
 import com.group1.interwasm.model.FunctionType;
 import com.group1.interwasm.model.Instruction;
@@ -15,28 +12,14 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class InterpreterTest {
+class InterpreterTest extends InterpreterContractTest {
 
-    /** No-param, no-extra-local function returning i32. */
-    private static FunctionDef fn(List<Instruction> body) {
-        return new FunctionDef(
-                new FunctionType(List.of(), ValueType.I32),
-                List.of(),
-                body);
-    }
-
-    /** One i32 param, no extra locals. */
-    private static FunctionDef fn1(List<Instruction> body) {
-        return new FunctionDef(
-                new FunctionType(List.of(ValueType.I32), ValueType.I32),
-                List.of(),
-                body);
-    }
-
-    private static int run(List<Instruction> body) {
+    @Override
+    int run(List<Instruction> body) {
         return new Interpreter(fn(body)).invoke(List.of()).asI32();
     }
 
+<<<<<<< Updated upstream
     // Arithmetic 
 
     @Test
@@ -46,17 +29,16 @@ class InterpreterTest {
         assertEquals(-2, run(List.of(new ConstI32(-1), new ConstI32(-1), new I32Add())));
         assertEquals(0, run(List.of(new ConstI32(1), new ConstI32(-1), new I32Add())));
         assertEquals(Integer.MIN_VALUE, run(List.of(new ConstI32(Integer.MAX_VALUE), new ConstI32(1), new I32Add())));
+=======
+    @Override
+    WasmValue invoke(FunctionDef fn, List<WasmValue> args) {
+        return new Interpreter(fn).invoke(args);
+>>>>>>> Stashed changes
     }
 
-    @Test
-    void subtractsI32Values() {
-        assertEquals(7,                  run(List.of(new  ConstI32(10),                 new  ConstI32(3),   new  I32Sub())));
-        assertEquals(-3,                 run(List.of(new  ConstI32(0),                  new  ConstI32(3),   new  I32Sub())));
-        assertEquals(0,                  run(List.of(new  ConstI32(10),                 new  ConstI32(10),  new  I32Sub())));
-        assertEquals(-1,                 run(List.of(new  ConstI32(0),                  new  ConstI32(1),   new  I32Sub())));
-        assertEquals(Integer.MAX_VALUE,  run(List.of(new  ConstI32(Integer.MIN_VALUE),  new  ConstI32(1),   new  I32Sub())));
-    }
+    // ── Frame-specific validation (not part of the shared contract) ───────────
 
+<<<<<<< Updated upstream
     @Test
     void multipliesI32Values() {
         assertEquals(1, run(List.of(new ConstI32(-1), new ConstI32(-1), new I32Mul())));
@@ -211,48 +193,26 @@ class InterpreterTest {
 
     @Test
     void invokeRejectsWrongArgumentCount() {
+=======
+    @Test void invokeRejectsWrongArgumentCount() {
+>>>>>>> Stashed changes
         assertThrows(IllegalArgumentException.class, () ->
-                new Interpreter(fn1(List.of(new LocalGet(0))))
-                .invoke(List.of())
-                );
+                new Interpreter(fn1(List.of(new LocalGet(0)))).invoke(List.of()));
     }
 
-    @Test
-    void localGetRejectsInvalidIndex() {
+    @Test void localGetRejectsInvalidIndex() {
         assertThrows(IllegalArgumentException.class, () ->
-                run(List.of(new LocalGet(99)))
-                );
+                run(List.of(new LocalGet(99))));
     }
 
-    @Test
-    void localGetReturnsParam() {
-        WasmValue result = new Interpreter(fn1(List.of(new LocalGet(0))))
-                .invoke(List.of(WasmValue.i32(42)));
-        assertEquals(42, result.asI32());
-    }
-
-    @Test
-    void secondParamAccessible() {
-        FunctionDef fn = new FunctionDef(
-                new FunctionType(List.of(ValueType.I32, ValueType.I32), ValueType.I32),
-                List.of(),
-                    List.of(
-                        new LocalGet(1)
-                    )
-        );
-        WasmValue result = new Interpreter(fn).invoke(
-                List.of(WasmValue.i32(10), WasmValue.i32(20)));
-        assertEquals(20, result.asI32());
-    }
-
-    @Test
-    void extraLocalInitializedToZero() {
+    @Test void extraLocalInitializedToZeroViaFrame() {
         FunctionDef fn = new FunctionDef(
                 new FunctionType(List.of(), ValueType.I32),
                 List.of(ValueType.I32),
                 List.of(new LocalGet(0)));
         assertEquals(0, new Interpreter(fn).invoke(List.of()).asI32());
     }
+<<<<<<< Updated upstream
 
     @Test
     void localSetAndGet() {
@@ -457,4 +417,6 @@ class InterpreterTest {
                 new Block(List.of(new Br(0), new Unreachable())),
                 new ConstI32(42))));
     }
+=======
+>>>>>>> Stashed changes
 }

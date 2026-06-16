@@ -1,0 +1,17 @@
+Warming up and measuring Java interpreters...
+Running Node.js/V8 benchmark...
+
+=== WebAssembly VM comparison: tree-walking interpreter vs V8 JIT ===
+  Warm-up: 10,000 calls  |  Measure: 100,000 calls
+
+──────────────────────────────────────────────────────────────────────────────────────
+  Function               │ Interp. (µs) │ Interp2 (µs) │ V8 JIT (µs) │    v1→v2 │    v2→V8
+──────────────────────────────────────────────────────────────────────────────────────
+  add_with_local(5) →10  │       0.188 │       0.118 │       0.012 │     1.6× │     9.9×
+  simple_loop(0) →45     │       1.449 │       0.924 │       0.029 │     1.6× │    31.9×
+  fibonacci(10) →55      │       1.944 │       1.113 │       0.008 │     1.7× │   139.1×
+──────────────────────────────────────────────────────────────────────────────────────
+
+  v1→v2  : speedup from int[] stack/locals + in-place ops (eliminates invokevirtual + heap alloc)
+  v2→V8  : remaining gap = tree dispatch overhead (recursive executeBody + Iterator + typeSwitch)
+           V8 JIT compiles .wasm to native — essentially pure Nutzlast, no interpreter overhead
