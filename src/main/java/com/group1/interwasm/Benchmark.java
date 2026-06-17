@@ -8,9 +8,9 @@ import com.group1.interwasm.instruction.locals.*;
 import com.group1.interwasm.model.FunctionDef;
 import com.group1.interwasm.model.FunctionType;
 import com.group1.interwasm.model.ValueType;
-import com.group1.interwasm.runtime.ExecutionStats;
 import com.group1.interwasm.runtime.Interpreter;
 import com.group1.interwasm.runtime.Interpreter2;
+import com.group1.interwasm.runtime.Interpreter3;
 import com.group1.interwasm.runtime.WasmValue;
 
 import java.io.BufferedReader;
@@ -21,23 +21,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Java interpreter benchmark -> compare against benchmark.js (Node.js / V8 JIT).
+ * Java interpreter benchmark → compare v1, v2, v3 against Node.js / V8 JIT.
  *
  * Run:  mvn compile exec:java -Dexec.mainClass=com.group1.interwasm.Benchmark
- *
- * Reports:
- *   - µs/call and calls/s  (compare timing against Node.js to see interpreter overhead)
- *   - dispatches, operandReads, operandWrites for one representative call
- *     (maps to the Dispatch / Operandenzugriff / Nutzlast breakdown from the slides)
  */
 public class Benchmark {
 
     //  Program definitions 
 
-    /**
-     * add_with_local(x) = x + 5
-     * Instructions: const 5, local.set 1, local.get 0, local.get 1, add
-     */
+    /** add_with_local(x) = x + 5 */
     static FunctionDef addWithLocal() {
         return new FunctionDef(
                 new FunctionType(List.of(ValueType.I32), ValueType.I32),
@@ -48,10 +40,7 @@ public class Benchmark {
                 ));
     }
 
-    /**
-     * simple_loop(x) = x + 0 + 1 + ... + 9  (= x + 45)
-     * block { loop { i>=10 → br 1; x+=i; i+=1; br 0 } }; local.get x
-     */
+    /** simple_loop(x) = x + 0 + 1 + … + 9  (= x + 45) */
     static FunctionDef simpleLoop() {
         return new FunctionDef(
                 new FunctionType(List.of(ValueType.I32), ValueType.I32),
@@ -69,30 +58,21 @@ public class Benchmark {
                 ));
     }
 
-    /**
-     * fibonacci(n) -> iterative, returns fib(n)
-     * Locals: 0=n(param), 1=a, 2=b, 3=i, 4=tmp
-     */
+    /** fibonacci(n) → iterative fib(n); locals: 0=n(param), 1=a, 2=b, 3=i, 4=tmp */
     static FunctionDef fibonacci() {
         return new FunctionDef(
                 new FunctionType(List.of(ValueType.I32), ValueType.I32),
-                List.of(ValueType.I32, ValueType.I32, ValueType.I32, ValueType.I32), // a,b,i,tmp
+                List.of(ValueType.I32, ValueType.I32, ValueType.I32, ValueType.I32),
                 List.of(
-                        // a=0, b=1, i=0
                         new ConstI32(0), new LocalSet(1),
                         new ConstI32(1), new LocalSet(2),
                         new ConstI32(0), new LocalSet(3),
                         new Block(List.of(
                                 new Loop(List.of(
-                                        // if i >= n: break
                                         new LocalGet(3), new LocalGet(0), new I32GeS(), new BrIf(1),
-                                        // tmp = a + b
                                         new LocalGet(1), new LocalGet(2), new I32Add(), new LocalSet(4),
-                                        // a = b
                                         new LocalGet(2), new LocalSet(1),
-                                        // b = tmp
                                         new LocalGet(4), new LocalSet(2),
-                                        // i++
                                         new LocalGet(3), new ConstI32(1), new I32Add(), new LocalSet(3),
                                         new Br(0)
                                 ))
@@ -101,15 +81,42 @@ public class Benchmark {
                 ));
     }
 
-    //  Benchmark runner 
+    /** count_primes(n) → number of primes in [2..n]; locals: 0=n, 1=count, 2=i, 3=is_prime, 4=j */
+    static FunctionDef countPrimes() {
+        return new FunctionDef(
+                new FunctionType(List.of(ValueType.I32), ValueType.I32),
+                List.of(ValueType.I32, ValueType.I32, ValueType.I32, ValueType.I32),
+                List.of(
+                        new ConstI32(0), new LocalSet(1),
+                        new ConstI32(2), new LocalSet(2),
+                        new Block(List.of(
+                                new Loop(List.of(
+                                        new LocalGet(2), new LocalGet(0), new I32GtS(), new BrIf(1),
+                                        new ConstI32(1), new LocalSet(3),
+                                        new ConstI32(2), new LocalSet(4),
+                                        new Block(List.of(
+                                                new Loop(List.of(
+                                                        new LocalGet(4), new LocalGet(4), new I32Mul(), new LocalGet(2), new I32GtS(), new BrIf(1),
+                                                        new LocalGet(2), new LocalGet(4), new I32RemS(), new I32Eqz(),
+                                                        new If(List.of(new ConstI32(0), new LocalSet(3), new Br(2)), List.of()),
+                                                        new LocalGet(4), new ConstI32(1), new I32Add(), new LocalSet(4),
+                                                        new Br(0)
+                                                ))
+                                        )),
+                                        new LocalGet(3),
+                                        new If(List.of(new LocalGet(1), new ConstI32(1), new I32Add(), new LocalSet(1)), List.of()),
+                                        new LocalGet(2), new ConstI32(1), new I32Add(), new LocalSet(2),
+                                        new Br(0)
+                                ))
+                        )),
+                        new LocalGet(1)
+                ));
+    }
+
+    //  Timing helpers
 
     static double timeInterpreter(FunctionDef fn, int input, int warmup, int measure) {
         Interpreter interp = new Interpreter(fn);
-<<<<<<< Updated upstream
-
-        // Warm up -> lets the JVM JIT-compile the interpreter itself
-=======
->>>>>>> Stashed changes
         for (int i = 0; i < warmup; i++) interp.invoke(List.of(WasmValue.i32(input)));
         long t0 = System.nanoTime();
         for (int i = 0; i < measure; i++) interp.invoke(List.of(WasmValue.i32(input)));
@@ -124,20 +131,14 @@ public class Benchmark {
         return (double)(System.nanoTime() - t0) / measure / 1000.0;
     }
 
-<<<<<<< Updated upstream
-        // Collect stats for one representative call
-        ExecutionStats stats = new ExecutionStats();
-        Interpreter statsInterp = new Interpreter(fn, stats);
-        int result = statsInterp.invoke(List.of(WasmValue.i32(input))).asI32();
+    static double timeInterpreter3(FunctionDef fn, int input, int warmup, int measure) {
+        Interpreter3 interp = new Interpreter3(fn);
+        for (int i = 0; i < warmup; i++) interp.invoke(List.of(WasmValue.i32(input)));
+        long t0 = System.nanoTime();
+        for (int i = 0; i < measure; i++) interp.invoke(List.of(WasmValue.i32(input)));
+        return (double)(System.nanoTime() - t0) / measure / 1000.0;
+    }
 
-        System.out.printf("%-30s input=%5d  result=%6d  %8.3f µs/call  %12s calls/s%n",
-                label, input, result,
-                usPerCall,
-                String.format("%,.0f", callsPerSec));
-        System.out.printf("  └ dispatches=%-6d  operandReads=%-6d  operandWrites=%-6d  operandOps/dispatch=%.2f%n%n",
-                stats.dispatches, stats.operandReads, stats.operandWrites,
-                stats.dispatches == 0 ? 0.0 : (double) stats.totalOperandOps() / stats.dispatches);
-=======
     /** Spawns `node benchmark.js` and parses "label ... X.XXX µs/call" lines. */
     static Map<String, Double> runNodeBenchmark() {
         Map<String, Double> results = new LinkedHashMap<>();
@@ -162,58 +163,141 @@ public class Benchmark {
             }
             proc.waitFor();
         } catch (Exception e) {
-            System.err.println("Warning: could not run node benchmark.js — " + e.getMessage());
+            System.err.println("Warning: could not run node benchmark.js" + e.getMessage());
         }
         return results;
->>>>>>> Stashed changes
     }
 
+    // Benchmark case 
+
+    record Case(String label, FunctionDef fn, int input, int result, int measure) {}
+
+    static final List<Case> CASES = List.of(
+            new Case("add_with_local(5)",  addWithLocal(),   5,  10, 100_000),
+            new Case("simple_loop(0)",     simpleLoop(),     0,  45, 100_000),
+            new Case("fibonacci(10)",      fibonacci(),     10,  55, 100_000),
+            new Case("count_primes(100)",  countPrimes(),  100,  25,  10_000)
+    );
+
+    //  Main ───────────────────────────────────────────────────────────────────
+
+    /**
+     * Usage:
+     *   mvn compile exec:java -Dexec.mainClass=com.group1.interwasm.Benchmark
+     *   mvn compile exec:java -Dexec.mainClass=com.group1.interwasm.Benchmark -Dexec.args="v1"
+     *   mvn compile exec:java -Dexec.mainClass=com.group1.interwasm.Benchmark -Dexec.args="v2"
+     *   mvn compile exec:java -Dexec.mainClass=com.group1.interwasm.Benchmark -Dexec.args="v3"
+     *   mvn compile exec:java -Dexec.mainClass=com.group1.interwasm.Benchmark -Dexec.args="all"
+     */
     public static void main(String[] args) {
-        final int WARMUP = 10_000, MEASURE = 100_000;
+        String mode = args.length > 0 ? args[0].toLowerCase() : "all";
+        final int WARMUP = 10_000;
+        int n = CASES.size();
 
-        record Case(String label, FunctionDef fn, int input, int result) {}
-        List<Case> cases = List.of(
-                new Case("add_with_local(5)",  addWithLocal(),  5,  10),
-                new Case("simple_loop(0)",     simpleLoop(),    0,  45),
-                new Case("fibonacci(10)",      fibonacci(),    10,  55)
-        );
+        boolean needV2 = !mode.equals("v1");
+        boolean needV3 = mode.equals("v3") || mode.equals("all");
 
-        System.out.println("Warming up and measuring Java interpreters...");
-        double[] us1 = new double[cases.size()];
-        double[] us2 = new double[cases.size()];
-        for (int i = 0; i < cases.size(); i++) {
-            Case c = cases.get(i);
-            us1[i] = timeInterpreter(c.fn(), c.input(), WARMUP, MEASURE);
-            us2[i] = timeInterpreter2(c.fn(), c.input(), WARMUP, MEASURE);
+        System.out.println("Warming up and measuring...");
+        double[] us1 = new double[n], us2 = new double[n], us3 = new double[n];
+        for (int i = 0; i < n; i++) {
+            Case c = CASES.get(i);
+            us1[i] = timeInterpreter(c.fn(), c.input(), WARMUP, c.measure());
+            if (needV2) us2[i] = timeInterpreter2(c.fn(), c.input(), WARMUP, c.measure());
+            if (needV3) us3[i] = timeInterpreter3(c.fn(), c.input(), WARMUP, c.measure());
         }
 
         System.out.println("Running Node.js/V8 benchmark...");
         Map<String, Double> node = runNodeBenchmark();
-
         System.out.println();
-        System.out.println("=== WebAssembly VM comparison: tree-walking interpreter vs V8 JIT ===");
+
+        switch (mode) {
+            case "v1"  -> printV1(us1, node);
+            case "v2"  -> printV2(us1, us2, node);
+            case "v3"  -> printV3(us1, us2, us3, node);
+            default    -> printAll(us1, us2, us3, node);
+        }
+    }
+
+    // Per-mode output 
+
+    private static void printV1(double[] us1, Map<String, Double> node) {
+        System.out.println("=== v1: naive tree-walking interpreter vs V8 JIT ===");
+        System.out.println("  ControlSignal objects  |  ArrayDeque<WasmValue> stack  |  List<WasmValue> locals");
         System.out.println("  Warm-up: 10,000 calls  |  Measure: 100,000 calls\n");
-
-        String sep = "─".repeat(86);
+        String sep = "─".repeat(68);
         System.out.println(sep);
-        System.out.printf("  %-22s │ %11s │ %11s │ %11s │ %8s │ %8s%n",
-                "Function", "Interp. (µs)", "Interp2 (µs)", "V8 JIT (µs)", "v1→v2", "v2→V8");
+        System.out.printf("  %-24s │ %10s │ %10s │ %8s%n", "Function", "v1 (µs)", "V8 (µs)", "gap");
         System.out.println(sep);
-
-        for (int i = 0; i < cases.size(); i++) {
-            Case c = cases.get(i);
-            Double nodeUs = node.get(c.label());
-            String nodeStr  = nodeUs != null ? String.format("%11.3f", nodeUs) : "        N/A";
-            String v2vsV8   = nodeUs != null ? String.format("%7.1f×", us2[i] / nodeUs) : "      N/A";
-            System.out.printf("  %-22s │ %11.3f │ %11.3f │ %s │ %7.1f× │ %s%n",
-                    c.label() + " →" + c.result(),
-                    us1[i], us2[i], nodeStr,
-                    us1[i] / us2[i], v2vsV8);
+        for (int i = 0; i < CASES.size(); i++) {
+            Case c = CASES.get(i);
+            Double v8 = node.get(c.label());
+            String v8s  = v8 != null ? String.format("%10.3f", v8)           : "       N/A";
+            String gaps = v8 != null ? String.format("%7.1f×", us1[i] / v8)  : "     N/A";
+            System.out.printf("  %-24s │ %10.3f │ %s │ %s%n",
+                    c.label(), us1[i], v8s, gaps);
         }
         System.out.println(sep);
-        System.out.println();
-        System.out.println("  v1→v2  : speedup from int[] stack/locals + in-place ops (eliminates invokevirtual + heap alloc)");
-        System.out.println("  v2→V8  : remaining gap = tree dispatch overhead (recursive executeBody + Iterator + typeSwitch)");
-        System.out.println("           V8 JIT compiles .wasm to native — essentially pure Nutzlast, no interpreter overhead");
+    }
+
+    private static void printV2(double[] us1, double[] us2, Map<String, Double> node) {
+        System.out.println("=== v2: optimised interpreter vs v1 vs V8 JIT ===");
+        System.out.println("  int[] stack + int sp  |  int signal  |  int[] locals  |  in-place binary ops");
+        System.out.println("  Warm-up: 10,000 calls  |  Measure: 100,000 calls\n");
+        String sep = "─".repeat(85);
+        System.out.println(sep);
+        System.out.printf("  %-24s │ %10s │ %10s │ %10s │ %7s │ %7s%n",
+                "Function", "v1 (µs)", "v2 (µs)", "V8 (µs)", "v1→v2", "v2→V8");
+        System.out.println(sep);
+        for (int i = 0; i < CASES.size(); i++) {
+            Case c = CASES.get(i);
+            Double v8 = node.get(c.label());
+            String v8s  = v8 != null ? String.format("%10.3f", v8)           : "       N/A";
+            String v2v8 = v8 != null ? String.format("%6.1f×", us2[i] / v8)  : "    N/A";
+            System.out.printf("  %-24s │ %10.3f │ %10.3f │ %s │ %6.1f× │ %s%n",
+                    c.label(), us1[i], us2[i], v8s,
+                    us1[i] / us2[i], v2v8);
+        }
+        System.out.println(sep);
+    }
+
+    private static void printV3(double[] us1, double[] us2, double[] us3, Map<String, Double> node) {
+        System.out.println("=== v3: flat-bytecode interpreter vs v2 vs V8 JIT ===");
+        System.out.println("  int[] code compiled once  |  backpatched jumps  |  single while+switch dispatch loop");
+        System.out.println("  Warm-up: 10,000 calls  |  Measure: 100,000 calls\n");
+        String sep = "─".repeat(108);
+        System.out.println(sep);
+        System.out.printf("  %-24s │ %10s │ %10s │ %10s │ %10s │ %7s │ %7s │ %7s%n",
+                "Function", "v1 (µs)", "v2 (µs)", "v3 (µs)", "V8 (µs)", "v1→v2", "v2→v3", "v3→V8");
+        System.out.println(sep);
+        for (int i = 0; i < CASES.size(); i++) {
+            Case c = CASES.get(i);
+            Double v8 = node.get(c.label());
+            String v8s  = v8 != null ? String.format("%10.3f", v8)           : "       N/A";
+            String v3v8 = v8 != null ? String.format("%6.1f×", us3[i] / v8)  : "    N/A";
+            System.out.printf("  %-24s │ %10.3f │ %10.3f │ %10.3f │ %s │ %6.1f× │ %6.1f× │ %s%n",
+                    c.label(), us1[i], us2[i], us3[i], v8s,
+                    us1[i] / us2[i], us2[i] / us3[i], v3v8);
+        }
+        System.out.println(sep);
+    }
+
+    private static void printAll(double[] us1, double[] us2, double[] us3, Map<String, Double> node) {
+        System.out.println("=== Full comparison: v1 vs v2 vs v3 vs V8 JIT ===");
+        System.out.println("  Warm-up: 10,000 calls  |  Measure: 100,000 calls\n");
+        String sep = "─".repeat(108);
+        System.out.println(sep);
+        System.out.printf("  %-24s │ %10s │ %10s │ %10s │ %10s │ %7s │ %7s │ %7s%n",
+                "Function", "v1 (µs)", "v2 (µs)", "v3 (µs)", "V8 (µs)", "v1→v2", "v2→v3", "v3→V8");
+        System.out.println(sep);
+        for (int i = 0; i < CASES.size(); i++) {
+            Case c = CASES.get(i);
+            Double v8 = node.get(c.label());
+            String v8s  = v8 != null ? String.format("%10.3f", v8)           : "       N/A";
+            String v3v8 = v8 != null ? String.format("%6.1f×", us3[i] / v8)  : "    N/A";
+            System.out.printf("  %-24s │ %10.3f │ %10.3f │ %10.3f │ %s │ %6.1f× │ %6.1f× │ %s%n",
+                    c.label(), us1[i], us2[i], us3[i], v8s,
+                    us1[i] / us2[i], us2[i] / us3[i], v3v8);
+        }
+        System.out.println(sep);
     }
 }

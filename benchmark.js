@@ -23,7 +23,7 @@ async function loadWasm(path) {
 }
 
 function bench(label, fn, input, warmupReps, measureReps) {
-    // Warm up — lets V8 JIT compile the function
+    // Warm up lets V8 JIT compile the function
     for (let i = 0; i < warmupReps; i++) fn(input);
 
     const t0 = performance.now();
@@ -44,17 +44,17 @@ async function main() {
     console.log('=== Node.js / V8 JIT WebAssembly benchmark ===\n');
 
     const addWithLocal = await loadWasm(`${BASE}/add_with_local/add_with_local.wasm`);
-    const simpleLoop   = await loadWasm(`${BASE}/simple_loop/simple_loop.wasm`);
-    const fibonacci    = await loadWasm(`${BASE}/fibonacci/fibonacci.wasm`);
-    const countPrimes  = await loadWasm(`${BASE}/count_primes/count_primes.wasm`);
+    const simpleLoop = await loadWasm(`${BASE}/simple_loop/simple_loop.wasm`);
+    const fibonacci = await loadWasm(`${BASE}/fibonacci/fibonacci.wasm`);
+    const countPrimes = await loadWasm(`${BASE}/count_primes/count_primes.wasm`);
 
-    const WARMUP   = 10_000;
-    const MEASURE  = 100_000;
+    const WARMUP = 10_000;
+    const MEASURE = 100_000;
 
-    bench('add_with_local(5)',   addWithLocal, 5,   WARMUP, MEASURE);
-    bench('simple_loop(0)',      simpleLoop,   0,   WARMUP, MEASURE);
-    bench('fibonacci(10)',       fibonacci,    10,  WARMUP, MEASURE);
-    bench('count_primes(100)',   countPrimes,  100, WARMUP, 10_000);
+    bench('add_with_local(5)', addWithLocal, 5, WARMUP, MEASURE);
+    bench('simple_loop(0)', simpleLoop, 0, WARMUP, MEASURE);
+    bench('fibonacci(10)', fibonacci, 10, WARMUP, MEASURE);
+    bench('count_primes(100)', countPrimes, 100, WARMUP, 10_000);
 
     console.log('\nNote: V8 JIT ≈ pure Nutzlast (no interpreter dispatch/operand overhead).');
     console.log('Compare these numbers against the Java interpreter benchmark.');

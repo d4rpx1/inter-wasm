@@ -1,0 +1,1240 @@
+  ---
+  How v1 handles control flow — a step-by-step walkthrough
+
+  ---
+  1. The big picture: the tree IS the program
+
+  In v1, the instruction list produced by the WasmReader is not "decoded" further before execution. The interpreter walks it directly. Every structured construct —
+  Block, Loop, If — is a Java object that contains its own body as a List<Instruction>. So the program is literally a tree:
+
+  Block
+  └─ Loop
+     ├─ LocalGet(1)
+     ├─ consti32(10)
+     ├─ i32ges
+     ├─ brif(1)      ← "break out of the block"
+     ├─ ...
+     └─ br(0)        ← "restart this loop"
+
+  the interpreter recurses into each node with executebody(body, frame).
+
+  ---
+  2. the controlsignal — how a branch "escapes" upward
+
+  this is the core mechanism. look at controlsignal.java:
+
+```
+  public sealed interface controlsignal
+      permits controlsignal.next, controlsignal.branch, controlsignal.functionreturn {
+
+      record next()           implements controlsignal {}
+      record branch(int depth) implements controlsignal {}
+      record functionreturn() implements controlsignal {}
+
+      controlsignal next   = new next();
+      controlsignal return = new functionreturn();
+  }
+```
+  every call to execute() returns one of three things:
+
+  ┌────────────────┬───────────────────────────────────────────┐
+  │     signal     │                  meaning                  │
+  ├────────────────┼───────────────────────────────────────────┤
+  │ next           │ "i finished normally, keep going"         │
+  ├────────────────┼───────────────────────────────────────────┤
+  │ branch(n)      │ "i want to jump to the label n levels up" │
+  ├────────────────┼───────────────────────────────────────────┤
+  │ functionreturn │ "exit the whole function now"             │
+  └────────────────┴───────────────────────────────────────────┘
+
+  the key insight: there is no goto. instead, a branch instruction hands a branch(n) object back up the java call stack, and each enclosing construct catches it,
+  decrements the depth, and either absorbs it (if n was 0) or passes it further up.
+
+  ---
+  3. the execution engine
+
+    ```java
+  private controlsignal executebody(list<instruction> body, frame frame) {
+      for (instruction instruction : body) {
+          controlsignal signal = execute(instruction, frame);
+          if (!(signal instanceof controlsignal.next)) {
+              return signal;   // <- stop the for-loop, bubble up
+          }
+      }
+      return controlsignal.next;
+  }
+    ```
+  executebody runs instructions one by one. the moment anything other than next comes back, it immediately stops the loop and returns that signal to its own caller.
+  this is how a branch "cuts through" the middle of a body.
+
+  ---
+  4. what labels are — and why they are not stored anywhere
+
+  in webassembly, "labels" are not named things you declare. they are implicit and relative. every structured construct (block, loop, if) implicitly creates one
+  label. the labels are numbered by nesting depth from the current instruction outward:
+
+  - depth 0 = the immediately enclosing construct
+  - depth 1 = the one outside that
+  - depth 2 = the one outside that
+  - … and so on
+
+  that numbering is purely positional. v1 does not build a label table. instead, each nesting level is represented by one stack frame of the java recursion. when
+  branch(n) travels up through n levels, it passes through exactly n recursive java calls.
+
+  ---
+  5. br — unconditional branch
+
+  case br br -> { return new controlsignal.branch(br.labelindex()); }
+
+  that's it. it creates a branch object carrying the raw depth number and returns it immediately. no jumping happens yet. the signal now propagates upward.
+
+  ---
+  6. brif — conditional branch
+
+  case brif brif -> {
+      int cond = stack.popi32();
+      if (cond != 0) return new controlsignal.branch(brif.labelindex());
+  }
+
+  pops the top-of-stack as the condition. if non-zero, fires the branch exactly like br. if zero, returns next — execution continues to the next instruction.
+
+  ---
+  7. block — how a forward branch is caught
+
+  case block block -> {
+      int saveddepth = stack.size();
+      controlsignal signal = executebody(block.body(), frame);
+
+      if (signal instanceof controlsignal.branch b && b.depth() == 0) {
+          stack.truncateto(saveddepth);
+          return controlsignal.next;                       // absorbed
+      } else if (signal instanceof controlsignal.branch b) {
+          stack.truncateto(saveddepth);
+          return new controlsignal.branch(b.depth() - 1); // pass upward, decremented
+      }
+      return signal;  // next or functionreturn: pass through unchanged
+  }
+
+  step by step:
+
+  1. save the stack height before the block body runs. any values pushed inside the block that are left over when a branch fires will be discarded.
+  2. run the body with executebody. this may return next, branch(n), or functionreturn.
+  3. if branch(0): depth 0 means "exit this block". the block is absorbed — clean up the stack and return next to the outer level. execution continues after the
+  block, as if it completed normally.
+  4. if branch(n) where n > 0: this branch is aimed at something further out. decrement the depth by 1 (this block is one level consumed) and pass the signal upward.
+  5. next or functionreturn: pass through untouched.
+
+  the stack.truncateto(saveddepth) call handles the case from the contract test brunwindsstacktoblockentryheight — if the body pushed garbage values before the
+  branch fired, they are removed.
+
+  ---
+  8. loop — how a backward branch is caught
+
+  case loop loop -> {
+      int saveddepth = stack.size();
+      while (true) {
+          controlsignal signal = executebody(loop.body(), frame);
+
+          if (signal instanceof controlsignal.next) {
+              return controlsignal.next;              // body ran to end → exit loop
+          } else if (signal instanceof controlsignal.branch b && b.depth() == 0) {
+              stack.truncateto(saveddepth);
+              // branch(0) in a loop = restart
+          } else if (signal instanceof controlsignal.branch b) {
+              stack.truncateto(saveddepth);
+              return new controlsignal.branch(b.depth() - 1); // pass upward
+          } else {
+              return signal;                           // functionreturn
+          }
+      }
+  }
+
+  this is where loops get their meaning. the key difference from block:
+
+  - branch(0) inside a loop = restart. in webassembly's design, a loop's label points back to the top, so br 0 means "go to the beginning of this loop again". the
+  java while (true) loop literally re-runs executebody(loop.body(), frame).
+  - branch(n) where n > 0 = exit this loop and aim further out. decrement and propagate exactly like block.
+  - next (the body ran to the end without a branch) = the loop exits naturally.
+
+  there is no jump, no program counter. the "backward jump" is the continue of the java while (true).
+
+  ---
+  9. tracing simple_loop end to end
+
+  the program (from benchmark.java):
+
+  // locals: 0 = x (param), 1 = i
+  block {
+      loop {
+          localget(1), consti32(10), i32ges,
+          brif(1),                              ← if i >= 10: exit the block
+          localget(0), localget(1), i32add, localset(0),  ← x += i
+          localget(1), consti32(1), i32add, localset(1),  ← i++
+          br(0)                                 ← restart the loop
+      }
+  }
+  localget(0)                                   ← push x as return value
+
+  call invoke([x=0]).
+
+  iteration 1 (i=0, x=0):
+  1. executebody(block.body) → calls execute(loop) → enters while(true)
+  2. executebody(loop.body):
+    - localget(1) → push 0, consti32(10) → push 10, i32ges → pop both, push (0 >= 10) = 0
+    - brif(1): pop 0 → condition false → return next, continue loop body
+    - x += 0, i = 1
+    - br(0): return branch(0) immediately, stop body loop
+  3. loop sees branch(0) with depth=0 → it's a loop restart → continue the while
+
+  iteration 4 (i=3, x=3):
+  same path. result after: x=6, i=4.
+
+  iteration 11 (i=10, x=45):
+  1. localget(1) → 10, consti32(10) → 10, i32ges → (10 >= 10) = 1
+  2. brif(1): pop 1 → condition true → return branch(1) immediately, stop body loop
+  3. loop sees branch(1), depth=1 > 0 → decrement: return branch(0)
+  4. block sees branch(0), depth=0 → absorbed → return next
+  5. executebody of function body returns next, continues to localget(0) → pushes 45
+  6. invoke pops 45 as the return value.
+
+  ---
+  10. if — same mechanism, two bodies
+
+  case if ifinstr -> {
+      int cond = stack.popi32();
+      int saveddepth = stack.size();
+      list<instruction> body = cond != 0 ? ifinstr.thenbody() : ifinstr.elsebody();
+      controlsignal signal = executebody(body, frame);
+      if (signal instanceof controlsignal.branch b && b.depth() == 0) {
+          stack.truncateto(saveddepth);
+          return controlsignal.next;
+      } else if (signal instanceof controlsignal.branch b) {
+          stack.truncateto(saveddepth);
+          return new controlsignal.branch(b.depth() - 1);
+      }
+      return signal;
+  }
+
+  if works identically to block for branch handling. the only difference is it picks one of two bodies at runtime based on the condition. branch(0) exits the
+  if-construct; branch(n>0) propagates outward decremented.
+
+  ---
+  11. return
+
+  case return _ -> { return controlsignal.return; }
+
+  returns functionreturn. this signal is never absorbed by block, loop, or if — all of them fall through to return signal. it propagates all the way up through every
+  level of executebody until it reaches invoke, which simply does not check the signal and just pops the top of stack as the result.
+
+  ---
+  12. the full signal propagation table
+
+  ┌─────────────────┬─────────────────────┬─────────────────────┬─────────────────────┐
+  │ signal returned │    block sees it    │    loop sees it     │     if sees it      │
+  ├─────────────────┼─────────────────────┼─────────────────────┼─────────────────────┤
+  │ next            │ pass through        │ exit loop           │ pass through        │
+  ├─────────────────┼─────────────────────┼─────────────────────┼─────────────────────┤
+  │ branch(0)       │ absorb → next       │ restart loop        │ absorb → next       │
+  ├─────────────────┼─────────────────────┼─────────────────────┼─────────────────────┤
+  │ branch(n>0)     │ re-emit branch(n-1) │ re-emit branch(n-1) │ re-emit branch(n-1) │
+  ├─────────────────┼─────────────────────┼─────────────────────┼─────────────────────┤
+  │ functionreturn  │ pass through        │ pass through        │ pass through        │
+  └─────────────────┴─────────────────────┴─────────────────────┴─────────────────────┘
+
+  ---
+  13. why this design is elegant but slow
+
+  the elegance: the interpreter needs zero branch tables, zero label maps, zero jump target arrays. the java recursion is the label stack. each nested executebody
+  call is one label level.
+
+  the cost: for every single instruction in a loop body, you pay:
+  - an iterator step (for (instruction i : body))
+  - a java method call to execute()
+  - a type switch (instanceof pattern match against all instruction types)
+  - a return value that is always a heap-allocated branch object when branching
+
+  this is what v2 and v3 were built to eliminate.
+
+✻ cogitated for 1m 24s
+
+※ recap: all tests pass and v3 (flat bytecode interpreter) is implemented and benchmarked against v1, v2, and v8. you were just given a detailed explanation of how
+  v1 handles control flow for your class presentation. (disable recaps in /config)
+
+❯ okay can you know explain v2 in great detail
+
+● ---
+  how v2 works — a detailed walkthrough
+
+  ---
+  1. the core idea: same tree, cheaper machinery
+
+  v2 keeps the exact same structure as v1:
+  - it still walks the list<instruction> tree
+  - it still recurses into block / loop / if bodies
+  - it still propagates signals upward through the call stack
+
+  nothing about the algorithm changes. every optimization is purely in the data structures used to carry that algorithm out.
+
+  there are four specific changes. understanding each one individually, and then together, is the whole story of v2.
+
+  ---
+  2. change 1 — the operand stack: int[] + int sp instead of arraydeque<wasmvalue>
+
+  in v1, every value on the operand stack is a wasmvalue record:
+
+  // v1
+  public record wasmvalue(valuetype type, int i32) {}
+
+  private final deque<wasmvalue> values = new arraydeque<>();
+
+  public void pushi32(int value) {
+      push(wasmvalue.i32(value));      // allocates a new wasmvalue on the heap
+  }
+
+  public int popi32() {
+      return pop().asi32();            // dereferences the object, unboxes the int
+  }
+
+  every push allocates a new object on the heap. every pop dereferences a pointer. an add instruction does: pop → pop → compute → push = 3 object allocations + 3
+  pointer dereferences.
+
+  in v2 the stack is a plain int[] with a stack pointer sp:
+
+  // v2
+  private final int[] stack;
+  private int sp;
+
+  sp is the index of the top element. starts at -1 (empty). push = stack[++sp] = value. pop = stack[sp--].
+
+  now an add looks like:
+
+  // v1
+  case i32add _ -> {
+      int b = stack.popi32();    // invokevirtual + heap deref + unbox
+      int a = stack.popi32();    // same
+      stack.pushi32(a + b);      // new wasmvalue() allocation
+  }
+
+  // v2
+  case i32add _ -> { stack[sp - 1] += stack[sp]; sp--; }
+
+  v2 goes further: it uses in-place binary ops. instead of popping two values and pushing one result, it modifies stack[sp-1] directly and decrements sp by one. one
+  fewer array write. no objects. no indirection.
+
+  the same applies to all arithmetic and comparisons:
+
+  case i32sub  _ -> { stack[sp - 1] -= stack[sp]; sp--; }
+  case i32mul  _ -> { stack[sp - 1] *= stack[sp]; sp--; }
+  case i32eq   _ -> { stack[sp - 1] = (stack[sp - 1] == stack[sp]) ? 1 : 0; sp--; }
+  case i32eqz  _ -> stack[sp] = (stack[sp] == 0) ? 1 : 0;   // unary: modify in place
+
+  ---
+  3. change 2 — locals: int[] instead of list<wasmvalue>
+
+  in v1, locals are stored in a list<wasmvalue>:
+
+  // v1 frame
+  private final list<wasmvalue> locals = new arraylist<>();
+
+  public wasmvalue getlocal(int index) {
+      checklocalindex(index);           // bounds check + exception path
+      if (stats != null) stats.operandreads++;
+      return locals.get(index);         // invokevirtual list.get() + deref
+  }
+
+  every local.get is an invokevirtual call to list.get(), which returns a wasmvalue object that still needs .asi32() called on it.
+
+  in v2:
+
+  // v2
+  private final int[] locals;
+
+  case localget g -> stack[++sp] = locals[g.index()];   // iaload: one array read
+  case localset s -> locals[s.index()] = stack[sp--];   // iastore: one array write
+  case localtee t -> locals[t.index()] = stack[sp];     // peek: sp unchanged
+
+  direct array access (iaload/iastore) — the jvm's single fastest memory operation.
+
+  the locals array is allocated in the constructor (once) with the right size:
+
+  int localcount = functiondef.type().paramcount() + functiondef.locals().size();
+  this.locals = new int[localcount];
+
+  and reset on each invoke():
+
+  public wasmvalue invoke(list<wasmvalue> args) {
+      sp = -1;
+      for (int i = 0; i < args.size(); i++) locals[i] = args.get(i).asi32();
+      arrays.fill(locals, args.size(), locals.length, 0);
+      executebody(function.body());
+      return wasmvalue.i32(stack[sp--]);
+  }
+
+  this means the same int[] is reused across repeated calls — no allocation per invocation.
+
+  ---
+  4. change 3 — the control signal: int instead of sealed interface
+
+  in v1, controlsignal is a sealed interface with three record implementations. every branch instruction allocates a heap object:
+
+  // v1
+  case br br -> { return new controlsignal.branch(br.labelindex()); }
+
+  every construct checks with instanceof:
+
+  // v1
+  if (signal instanceof controlsignal.branch b && b.depth() == 0) { ... }
+  else if (signal instanceof controlsignal.branch b) { ... }
+
+  v2 replaces all of this with a single int, using an encoding agreed upon by the whole class:
+
+  // v2
+  private static final int sig_next   =  0;
+  private static final int sig_return = -1;
+  // branch(n) encodes as n+1 ; decode: depth = sig - 1
+
+  ┌────────────────┬────────┐
+  │    v1 value    │ v2 int │
+  ├────────────────┼────────┤
+  │ next           │ 0      │
+  ├────────────────┼────────┤
+  │ functionreturn │ -1     │
+  ├────────────────┼────────┤
+  │ branch(0)      │ 1      │
+  ├────────────────┼────────┤
+  │ branch(1)      │ 2      │
+  ├────────────────┼────────┤
+  │ branch(n)      │ n + 1  │
+  └────────────────┴────────┘
+
+  now a branch instruction is:
+
+  // v2
+  case br   br   -> { return br.labelindex() + 1; }
+  case brif brif -> { if (stack[sp--] != 0) return brif.labelindex() + 1; }
+  case return  _ -> { return sig_return; }
+
+  no object allocation at all.
+
+  the check in each construct becomes integer comparisons:
+
+  // v2 — block
+  if (sig > 0) {          // any branch
+      sp = savedsp;
+      int depth = sig - 1;
+      return depth == 0 ? sig_next : depth;  // depth re-encodes as branch(depth-1)
+  }
+  return sig;
+
+  sig > 0 is a single integer compare. decoding is sig - 1. re-encoding for propagation is just passing depth (which is already n+1-1 = n, the encoding for
+  branch(n-1)). no objects, no instanceof.
+
+  ---
+  5. change 4 — the frame is gone
+
+  v1 has a frame object that wraps locals and the operand stack together:
+
+  // v1
+  frame frame = new frame(function, args, stats);
+  executebody(function.body(), frame);
+  return frame.operandstack().pop();
+
+  every execute() call receives the frame as a parameter. every local access goes through frame.getlocal() which has index validation and stats tracking woven in.
+
+  v2 has no frame. the stack and locals arrays are direct fields of the interpreter. execute() takes no frame parameter — it accesses stack and locals directly:
+
+  // v2
+  private int executebody(list<instruction> body) {
+      for (instruction instruction : body) {
+          int sig = execute(instruction);
+          if (sig != sig_next) return sig;
+      }
+      return sig_next;
+  }
+
+  private int execute(instruction instruction) {
+      switch (instruction) {
+          case localget g -> stack[++sp] = locals[g.index()];
+          ...
+      }
+  }
+
+  one fewer parameter per call, and no indirection through the frame object.
+
+  ---
+  6. the control flow — identical logic, cheaper code
+
+  now that you understand the encoding, let's look at how block, loop, and if work in v2. the logic is exactly the same as v1. only the signal type changes.
+
+  block
+
+  case block block -> {
+      int savedsp = sp;
+      int sig = executebody(block.body());
+      if (sig > 0) {   // any branch signal
+          sp = savedsp;
+          int depth = sig - 1;
+          return depth == 0 ? sig_next : depth;
+      }
+      return sig;
+  }
+
+  - sig > 0 means "some branch came back"
+  - depth = sig - 1 decodes the branch depth
+  - if depth == 0: this block absorbs it, clean up stack, return sig_next (= 0)
+  - if depth > 0: decrement and re-encode — since depth = (original_depth+1) - 1, it is already the correct encoding for branch(depth-1)
+  - sp = savedsp: same stack cleanup as v1
+
+  loop
+
+  case loop loop -> {
+      int savedsp = sp;
+      while (true) {
+          int sig = executebody(loop.body());
+          if (sig == sig_next)   return sig_next;
+          if (sig == sig_return) return sig_return;
+          int depth = sig - 1;
+          if (depth == 0) { sp = savedsp; continue; }  // branch(0) = restart
+          sp = savedsp;
+          return depth;  // branch(depth-1), re-encoded
+      }
+  }
+
+  the structure is identical to v1. branch(0) (encoded as 1) still means "restart the loop" — the continue of the java while (true). branch(n>0) decrements and
+  propagates.
+
+  if
+
+  case if ifinstr -> {
+      int cond = stack[sp--];
+      int savedsp = sp;
+      list<instruction> body = cond != 0 ? ifinstr.thenbody() : ifinstr.elsebody();
+      int sig = executebody(body);
+      if (sig > 0) {
+          sp = savedsp;
+          int depth = sig - 1;
+          return depth == 0 ? sig_next : depth;
+      }
+      return sig;
+  }
+
+  identical logic to v1's if. the only difference is cond = stack[sp--] (direct array access) instead of stack.popi32() (method call + object deref).
+
+  ---
+  7. tracing simple_loop through v2
+
+  same program, same input x=0:
+
+  block {
+      loop {
+          localget(1), consti32(10), i32ges, brif(1),
+          localget(0), localget(1), i32add,  localset(0),
+          localget(1), consti32(1), i32add,  localset(1),
+          br(0)
+      }
+  }
+  localget(0)
+
+  invoke([0]):
+  - sp = -1, locals = [0, 0]
+  - executebody(functionbody)
+
+  iteration 1 (i=0, x=0):
+
+  1. execute(block):
+    - savedsp = -1
+    - calls executebody(block.body) → calls execute(loop)
+  2. execute(loop):
+    - savedsp = -1, enters while(true)
+    - calls executebody(loop.body)
+  3. loop body execution:
+    - localget(1): stack[++sp] = locals[1] → stack[0] = 0, sp=0
+    - consti32(10): stack[++sp] = 10 → stack[1] = 10, sp=1
+    - i32ges: stack[sp-1] = (stack[0] >= stack[1]) ? 1 : 0 = (0 >= 10) ? 1 : 0 = 0, sp=0
+    - brif(1): stack[sp--] = stack[0] = 0, sp=-1 — condition false → return sig_next, continue body
+    - x += 0, i = 1 (four array read/writes)
+    - br(0): return 1 (= 0 + 1, encoding for branch(0))
+  4. executebody of loop body sees sig = 1 ≠ sig_next → returns 1
+  5. execute(loop) sees sig = 1:
+    - sig ≠ sig_next (0), sig ≠ sig_return (-1)
+    - depth = sig - 1 = 0 → sp = savedsp = -1, continue → next iteration
+
+  iteration 11 (i=10, x=45):
+
+  1. loop body runs:
+    - i32ges → (10 >= 10) = 1, sp=0
+    - brif(1): stack[0] = 1, sp=-1 — condition true → return 1 + 1 = 2
+  2. executebody of loop body sees sig = 2 ≠ sig_next → returns 2
+  3. execute(loop) sees sig = 2:
+    - depth = sig - 1 = 1 > 0
+    - sp = savedsp = -1
+    - returns 1 (= depth = encoding for branch(0))
+  4. execute(block) sees sig = 1:
+    - depth = sig - 1 = 0
+    - sp = savedsp = -1
+    - returns sig_next (= 0)
+  5. function body's executebody sees sig_next → continues to localget(0)
+    - stack[0] = locals[0] = 45, sp=0
+  6. invoke() does wasmvalue.i32(stack[sp--]) → returns i32(45)
+
+  ---
+  8. side-by-side: what changed and what stayed the same
+
+  ┌────────────────────────┬────────────────────────────────────────┬────────────────────────────────────────────────┐
+  │         aspect         │                   v1                   │                       v2                       │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ tree structure walked  │ list<instruction> tree                 │ same                                           │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ recursion into bodies  │ executebody recurses                   │ same                                           │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ labels as java frames  │ implicit in call stack                 │ same                                           │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ branch propagation     │ controlsignal objects bubble up        │ same — int bubbles up                          │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ branch(n) encoding     │ new branch(n) (heap object)            │ n + 1 (integer)                                │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ next                   │ new next() singleton                   │ 0                                              │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ functionreturn         │ new functionreturn() singleton         │ -1                                             │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ operand stack          │ arraydeque<wasmvalue>                  │ int[] + sp                                     │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ locals                 │ list<wasmvalue>                        │ int[]                                          │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ binary op              │ pop + pop + push (3 operations)        │ stack[sp-1] op= stack[sp]; sp-- (2 operations) │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ per-call allocation    │ wasmvalue per push, branch per branch  │ zero                                           │
+  ├────────────────────────┼────────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ dispatch call overhead │ execute(instr, frame) with frame param │ execute(instr) no frame                        │
+  └────────────────────────┴────────────────────────────────────────┴────────────────────────────────────────────────┘
+
+  the algorithm is 100% identical. the speedup (roughly 1.5–2×) comes entirely from replacing heap allocation and virtual dispatch with primitive array operations
+  and integer arithmetic.
+
+✻ worked for 1m 8s
+
+❯ now explain in great detail v3 since this is the most complicated change make sure i understand it
+
+● let me re-read v3 in full before explaining.
+
+  read 1 file (ctrl+o to expand)
+
+● api error: internal server error
+
+✻ crunched for 1m 23s
+
+❯ /cd
+  ⎿  usage: /cd <path>
+
+❯ /resume   ⎿  resume cancelled
+
+❯ now explain in great detail v3 since this is the most complicated change make sure i understand it
+
+● ---
+  how v3 works — a complete walkthrough
+
+  ---
+  1. the root problem v3 solves
+
+  to understand v3 you first need to understand what v1 and v2 still share that is expensive.
+
+  both v1 and v2 walk the tree of instructions. every loop iteration does this:
+
+  executebody(loop.body, ...)
+    → for (instruction instr : loop.body)   ← iterator.next() call
+        → execute(instr, ...)               ← java method call
+            → switch (instr) { ... }        ← instanceof type switch on an object
+            → return signal                 ← integer return (v2) or object return (v1)
+    → check signal
+    → if branch(0): continue while(true)   ← restart from the top of the list
+
+  for a loop that runs 1000 times with 10 instructions in its body, that is:
+  - 10,000 iterator.next() calls
+  - 10,000 execute() java method calls
+  - 10,000 type-switch dispatches on java objects
+  - 10,000 executebody returns that check the signal
+
+  all of this overhead is per instruction, per iteration. the actual computation (the +=, the >=, the array reads) is buried under it.
+
+  v3's insight: do one pass over the tree to produce a flat int[] where every instruction is a number and every jump target is already resolved. then execute that
+  array with a single while + switch — no recursion, no iterator, no method call per instruction, no type switch on objects.
+
+  ---
+  2. the two phases
+
+  constructor (runs once):
+      list<instruction> tree  ──[compiler]──►  int[] code
+
+  invoke() (runs every call):
+      int[] code  ──[run()]──►  result
+
+  the tree is walked once ever. all subsequent calls just execute the flat array. this is why v3 is faster than v2 even for the very first call: the dispatch loop
+  inside run() is simpler than executebody + execute, so even a single execution of the flat code beats the tree walk.
+
+  ---
+  3. the flat int[] format
+
+  the compiled program is a single int[] called code. each slot is one integer. an instruction in this array is either:
+
+  - 0-arg: just one slot (the opcode)
+  - 1-arg: two consecutive slots (opcode, then one operand)
+  - 2-arg: three consecutive slots (opcode, then two operands)
+
+  there is a pc (program counter) that starts at 0 and advances through these slots. the dispatch loop reads code[pc] as an opcode, increments pc, then reads however
+  many operand slots that opcode needs.
+
+  index:  0    1    2    3    4    5    6    7    8
+          op   val  op   op   idx  op   tgt  ssp  op
+          14   5    0    15   1    21   3    -1   12
+          │         │    │         │              │
+          const 5   add  get[1]    jump_if_sp     return
+                                   → target=3
+                                     savedsp=-1
+
+  ---
+  4. the opcode set
+
+  // 0-arg — pure stack operations
+  op_i32_add    =  0    // stack[sp-1] += stack[sp]; sp--
+  op_i32_sub    =  1
+  op_i32_mul    =  2
+  op_i32_div_s  =  3
+  op_i32_rem_s  =  4
+  op_i32_eqz    =  5    // stack[sp] = (stack[sp] == 0) ? 1 : 0
+  op_i32_eq     =  6
+  op_i32_ne     =  7
+  op_i32_lt_s   =  8
+  op_i32_gt_s   =  9
+  op_i32_le_s   = 10
+  op_i32_ge_s   = 11
+  op_return     = 12    // exit run() immediately
+  op_unreachable= 13
+
+  // 1-arg — carry one operand in the next slot
+  op_i32_const  = 14   operand: the integer value to push
+  op_local_get  = 15   operand: local index
+  op_local_set  = 16   operand: local index
+  op_local_tee  = 17   operand: local index
+
+  op_jump       = 18   operand: target pc          (unconditional, no stack change)
+  op_jump_if_z  = 19   operand: target pc          (pop cond; jump if cond == 0)
+
+  // 2-arg — carry two operands in the next two slots
+  op_jump_sp    = 20   operand1: target pc          (unconditional + reset sp)
+                       operand2: savedsp
+  op_jump_if_sp = 21   operand1: target pc          (pop cond; jump if cond != 0 + reset sp)
+                       operand2: savedsp
+
+  the four jump opcodes are the heart of v3. understanding why there are four of them — and what savedsp is — requires understanding the compile-time stack tracking,
+  which comes next.
+
+  ---
+  5. the problem of the stack on a branch
+
+  in v2, when a block catches a branch(0), it does:
+
+  sp = savedsp;   // discard anything the body pushed before the branch
+
+  for example:
+
+  const 7          sp: -1 → 0
+  block {
+      const 99     sp: 0 → 1
+      br 0         ← branch fires with sp=1
+  }                ← block sets sp back to 0  (savedsp was 0)
+  const 1          sp: 0 → 1
+  add              sp: 1 → 0   result = 7+1 = 8
+
+  without the sp = savedsp reset, the 99 would be stranded on the stack, corrupting the result.
+
+  in v3, there is no block case in the executor. a branch is just pc = target. so the sp reset must be baked into the jump instruction itself, as a second operand
+  called savedsp. the executor reads it and sets sp = savedsp when it takes the jump.
+
+  this is why we need op_jump_sp (branch + sp reset) alongside op_jump (branch only). and similarly op_jump_if_sp alongside op_jump_if_z.
+
+  ---
+  6. the compile-time stack depth tracker
+
+  to know what savedsp to embed, the compiler tracks a variable called stackdepth that mirrors the runtime sp exactly — it starts at -1 (empty) and changes by the
+  same amount as sp does for each instruction:
+
+  private int stackdepth = -1;
+
+  case consti32  c -> { emit(op_i32_const); emit(c.value()); stackdepth++; }
+  case i32add  _ ->   { emit(op_i32_add);   stackdepth--; }
+  case localget g -> { emit(op_local_get);  emit(g.index()); stackdepth++; }
+  case localset s -> { emit(op_local_set);  emit(s.index()); stackdepth--; }
+
+  when the compiler enters a block, it snapshots stackdepth at that moment. that snapshot is the savedsp that any branch targeting this block will carry. it is
+  exactly the value that the runtime sp holds when the block is entered.
+
+  case block block -> {
+      int savedsp = stackdepth;   // snapshot: "sp was this when block started"
+      label label = new label(label.type.block, savedsp, -1);
+      ...
+  }
+
+  ---
+  7. the label object — the compiler's memory
+
+  during compilation, each active construct (block, loop, if) is represented by a label object sitting on a compile-time labelstack (a plain list<label>):
+
+  private static final class label {
+      enum type { block, loop, if }
+
+      final type type;
+      final int  savedsp;              // sp when this construct was entered
+      final int  loopstart;            // only for loop: pc of first instruction in loop body
+      private final list<integer> patchsites = new arraylist<>();
+  }
+
+  three fields matter:
+
+  ┌────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │   field    │                                              what it is                                               │
+  ├────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ type       │ block, loop, or if — determines backward vs forward jump                                              │
+  ├────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ savedsp    │ the compile-time stackdepth at the moment of entry — becomes the savedsp operand in jump instructions │
+  ├────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ patchsites │ list of positions in buf where a jump target still needs to be filled in                              │
+  └────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  and the label stack itself:
+
+  private final list<label> labelstack = new arraylist<>();
+
+  the last element is the innermost (depth 0). to find the label at depth n:
+
+  private label labelat(int depth) {
+      return labelstack.get(labelstack.size() - 1 - depth);
+  }
+
+  this is how br 0 finds the innermost label, br 1 finds the one outside it, and so on — the same depth indexing as v1/v2, but now it's a list lookup during
+  compilation, not a runtime java call stack level.
+
+  ---
+  8. forward vs backward jumps — the core challenge
+
+  this is the hardest concept in v3.
+
+  when the compiler sees a br or brif instruction, it needs to emit a jump to an address in code. but does it know that address yet?
+
+  it depends on what is being targeted:
+
+  loop (backward jump — target is already known)
+
+  a br(0) inside a loop jumps to the start of the loop. the loop's start address was recorded when the compiler entered it:
+
+  case loop loop -> {
+      int loopstart = pos();   // ← record the current position = first instruction in loop
+      label label = new label(label.type.loop, savedsp, loopstart);
+      ...
+  }
+
+  when br(0) is compiled, the loop's label is on the stack and loopstart is already known. emit immediately:
+
+  emit(op_jump_sp);
+  emit(target.loopstart);  // ← known right now
+  emit(target.savedsp);
+
+  this is a backward jump — it points to an address earlier in the array.
+
+  block / if (forward jump — target is not yet known)
+
+  a br(0) inside a block jumps to after the block. but when compiling br(0), the compiler is still inside the block. the end of the block has not been emitted yet.
+  the address is unknown.
+
+  solution: emit a placeholder -1 and record the position:
+
+  emit(op_jump_sp);
+  target.addpatch(pos());  // ← remember this slot's index
+  emit(-1);                // ← placeholder: wrong value, will be fixed later
+  emit(target.savedsp);    // ← this is known right now
+
+  the label remembers this position in its patchsites list. when the compiler later reaches the end of the block, it knows the correct address and fills everything
+  in:
+
+  case block block -> {
+      ...
+      compilebody(block.body());
+      labelstack.remove(labelstack.size() - 1);
+      label.patchall(buf, pos());   // ← now we know the address: fill in all -1 placeholders
+  }
+
+  void patchall(list<integer> buf, int targetpc) {
+      for (int pos : patchsites) buf.set(pos, targetpc);
+  }
+
+  this technique — emitting a placeholder and filling it in later — is called backpatching. it is used in every real compiler.
+
+  ---
+  9. all four jump opcodes explained
+
+  now that you understand the savedsp and forward/backward split, the four jump opcodes make sense:
+
+  ┌───────────────┬────────────────────────────────────────────┬────────────┬────────────┬─────────────────┐
+  │    opcode     │                 when used                  │ pops cond? │ resets sp? │      args       │
+  ├───────────────┼────────────────────────────────────────────┼────────────┼────────────┼─────────────────┤
+  │ op_jump       │ end of if then-body, jumping past else     │ no         │ no         │ target          │
+  ├───────────────┼────────────────────────────────────────────┼────────────┼────────────┼─────────────────┤
+  │ op_jump_if_z  │ if condition check — jump to else if false │ yes        │ no         │ target          │
+  ├───────────────┼────────────────────────────────────────────┼────────────┼────────────┼─────────────────┤
+  │ op_jump_sp    │ br targeting block/loop/if                 │ no         │ yes        │ target, savedsp │
+  ├───────────────┼────────────────────────────────────────────┼────────────┼────────────┼─────────────────┤
+  │ op_jump_if_sp │ br_if targeting block/loop/if              │ yes        │ yes        │ target, savedsp │
+  └───────────────┴────────────────────────────────────────────┴────────────┴────────────┴─────────────────┘
+
+  the _sp suffix means "also reset sp". the _if_ infix means "conditional (pop and check)". the _z suffix on jump_if_z means "jump if zero" (false). the _if_sp means
+  "jump if nonzero (true) and reset sp".
+
+  ---
+  10. compiling each construct in detail
+
+  block
+
+  case block block -> {
+      int savedsp = stackdepth;                           // 1. snapshot sp
+      label label = new label(block, savedsp, -1);
+      labelstack.add(label);                              // 2. push label (depth 0 = this)
+      compilebody(block.body());                          // 3. compile body (may emit jumps targeting this label)
+      labelstack.remove(labelstack.size() - 1);           // 4. pop label
+      label.patchall(buf, pos());                         // 5. fill in all forward jump targets
+  }
+
+  steps 3 and 4 are recursive — the body may contain more blocks, loops, ifs. while the body is being compiled, this label is on the stack. any br(0) seen inside
+  will find it at depth 0, add a patch site, and emit -1. step 5 fills them all in with the current position (just after the block).
+
+  no jump instruction is emitted for the block itself. if the body falls through to the end naturally, execution just continues to the next instruction — no jump
+  needed.
+
+  loop
+
+  case loop loop -> {
+      int savedsp   = stackdepth;
+      int loopstart = pos();                              // 1. record start address now
+      label label = new label(loop, savedsp, loopstart);
+      labelstack.add(label);                              // 2. push label
+      compilebody(loop.body());                           // 3. compile body
+      labelstack.remove(labelstack.size() - 1);           // 4. pop label
+      label.patchall(buf, pos());                         // 5. patch any exits (br depth > 0 from inside)
+      stackdepth = savedsp;                               // 6. loop is void
+  }
+
+  the key difference from block: loopstart = pos() is recorded before compiling the body. when br(0) is seen inside, the target is loopstart — already known. so
+  backward jumps to loops are emitted immediately (no -1 placeholder). step 5 only patches branches that exit the loop (i.e., something inside the loop targeted a
+  depth that skipped over the loop label, such as br 1 inside a nested block-inside-loop).
+
+  if
+
+  case if ifinstr -> {
+      stackdepth--;                    // condition is popped
+      int savedsp = stackdepth;        // snapshot after pop
+
+      emit(op_jump_if_z);              // [a] conditional jump to else/end
+      int condjump = pos();
+      emit(-1);                        // placeholder for else-or-end address
+
+      label label = new label(if, savedsp, -1);
+      labelstack.add(label);
+
+      compilebody(ifinstr.thenbody()); // compile then-body
+
+      if (!ifinstr.elsebody().isempty()) {
+          emit(op_jump);               // [b] fall-through from then to end-of-if
+          int endjump = pos();
+          emit(-1);                    // placeholder for end address
+
+          patch(condjump, pos());      // [a] now points here (start of else)
+          stackdepth = savedsp;
+          compilebody(ifinstr.elsebody());
+
+          patch(endjump, pos());       // [b] now points here (end of if)
+      } else {
+          patch(condjump, pos());      // [a] no else: points to end directly
+          stackdepth = savedsp;
+      }
+
+      labelstack.remove(labelstack.size() - 1);
+      label.patchall(buf, pos());      // patch any explicit br(0) inside if-body
+  }
+
+  two patch points are created: condjump (the jump_if_z that skips the then-body) and endjump (the jump that skips the else-body after then completes). both use
+  plain op_jump / op_jump_if_z without _sp because the condition pop already moved sp to savedsp — no additional reset is needed for these structural jumps.
+
+  explicit br(0) instructions inside either body do need the reset and use op_jump_sp via the label's patch list.
+
+  br (unconditional branch)
+
+  case br br -> {
+      label target = labelat(br.labelindex());   // find the label at depth n
+      if (target.type == label.type.loop) {
+          // target address already known → emit immediately
+          emit(op_jump_sp);
+          emit(target.loopstart);
+          emit(target.savedsp);
+      } else {
+          // target address unknown → emit placeholder, register patch site
+          emit(op_jump_sp);
+          target.addpatch(pos());
+          emit(-1);                // placeholder
+          emit(target.savedsp);   // this is known
+      }
+  }
+
+  there is no longer any branch(n) signal and no depth decrement. instead, labelat(n) directly retrieves the right label. the depth number in the source code (br 1,
+  br 2) is resolved at compile time into a concrete loopstart address or a concrete savedsp, stored directly in the int[]. at runtime, the executor never needs to
+  know nesting depth at all.
+
+  brif (conditional branch)
+
+  case brif brif -> {
+      stackdepth--;    // condition is always popped
+      label target = labelat(brif.labelindex());
+      if (target.type == label.type.loop) {
+          emit(op_jump_if_sp); emit(target.loopstart); emit(target.savedsp);
+      } else {
+          emit(op_jump_if_sp);
+          target.addpatch(pos()); emit(-1);
+          emit(target.savedsp);
+      }
+  }
+
+  same as br but uses op_jump_if_sp — the condition is popped and tested at runtime. if true, jump and reset sp. if false, execution falls through to the next
+  instruction (with sp already decremented for the condition).
+
+  ---
+  11. compiling simple_loop — step by step
+
+  program:
+  block {
+      loop {
+          localget(1), consti32(10), i32ges, brif(1),
+          localget(0), localget(1), i32add,  localset(0),
+          localget(1), consti32(1), i32add,  localset(1),
+          br(0)
+      }
+  }
+  localget(0)
+
+  i will show the buf list and stackdepth after each step. pos() is buf.size().
+
+  ---
+  enter block:
+  - stackdepth = -1 → savedsp = -1
+  - create blocklabel = {block, savedsp=-1, patchsites=[]}
+  - push blocklabel onto labelstack: [blocklabel]
+
+  enter loop:
+  - stackdepth = -1 → savedsp = -1
+  - loopstart = pos() = 0
+  - create looplabel = {loop, savedsp=-1, loopstart=0, patchsites=[]}
+  - push looplabel: [blocklabel, looplabel]  ← looplabel is innermost (depth 0)
+
+  localget(1): emit [15, 1], stackdepth → 0
+  consti32(10): emit [14, 10], stackdepth → 1
+  i32ges: emit [11], stackdepth → 0
+
+  buf so far: [15, 1, 14, 10, 11], pos=5
+
+  brif(1):
+  - stackdepth-- → -1 (pop condition)
+  - labelat(1) = blocklabel (the one at index size-1-1 = 0 in the list) → type = block
+  - forward jump → emit op_jump_if_sp (=21):
+
+  emit(21)              buf[5] = 21,  pos=6
+  blocklabel.addpatch(6)              ← remember slot 6 needs the target
+  emit(-1)              buf[6] = -1,  pos=7   ← placeholder for "after block"
+  emit(-1)              buf[7] = -1,  pos=8   ← savedsp of blocklabel = -1
+
+  buf: [15, 1, 14, 10, 11, 21, -1, -1], pos=8, stackdepth=-1
+
+  localget(0): emit [15, 0], stackdepth → 0, pos=10
+  localget(1): emit [15, 1], stackdepth → 1, pos=12
+  i32add: emit [0], stackdepth → 0, pos=13
+  localset(0): emit [16, 0], stackdepth → -1, pos=15
+
+  localget(1): emit [15, 1], stackdepth → 0, pos=17
+  consti32(1): emit [14, 1], stackdepth → 1, pos=19
+  i32add: emit [0], stackdepth → 0, pos=20
+  localset(1): emit [16, 1], stackdepth → -1, pos=22
+
+  br(0):
+  - labelat(0) = looplabel (top of stack) → type = loop
+  - backward jump → target is already looplabel.loopstart = 0
+
+  emit(20)    buf[22] = 20  (op_jump_sp)
+  emit(0)     buf[23] = 0   (target = loopstart)
+  emit(-1)    buf[24] = -1  (savedsp of looplabel = -1)
+
+  pos=25, stackdepth unchanged (unreachable after)
+
+  ---
+  pop looplabel from labelstack: [blocklabel]
+
+  looplabel.patchall(buf, pos()=25) → looplabel has no patchsites → nothing to patch.
+
+  stackdepth = savedsp = -1 (loop is void)
+
+  ---
+  pop blocklabel from labelstack: []
+
+  blocklabel.patchall(buf, pos()=25):
+  - patchsites = [6]
+  - buf[6] = 25
+
+  now buf[6] = 25, which is "just after the loop/block".
+
+  ---
+  localget(0): emit [15, 0], stackdepth → 0, pos=27
+
+  ---
+  final code array:
+
+  index:  0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26
+  value: 15   1  14  10  11  21  25  -1  15   0  15   1   0  16   0  15   1  14   1   0  16   1  20   0  -1  15   0
+         │       │       │   │   │   │   │       │       │   │       │       │       │   │       │   │   │
+         get[1]  const10 ges jif_sp  │   get[0]  get[1]  add set[0]  get[1]  const1 add set[1]  jsp target│   get[0]
+                             target=25   savedsp
+                             savedsp=-1
+
+  let me write it more clearly:
+
+  ┌─────┬───────┬─────────────────────────────────────┐
+  │ pc  │ value │               meaning               │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 0   │ 15    │ op_local_get                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 1   │ 1     │ local index 1                       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 2   │ 14    │ op_i32_const                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 3   │ 10    │ value 10                            │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 4   │ 11    │ op_i32_ge_s                         │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 5   │ 21    │ op_jump_if_sp                       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 6   │ 25    │ target (patched: after block)       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 7   │ -1    │ savedsp for blocklabel = -1         │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 8   │ 15    │ op_local_get                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 9   │ 0     │ local index 0                       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 10  │ 15    │ op_local_get                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 11  │ 1     │ local index 1                       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 12  │ 0     │ op_i32_add                          │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 13  │ 16    │ op_local_set                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 14  │ 0     │ local index 0                       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 15  │ 15    │ op_local_get                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 16  │ 1     │ local index 1                       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 17  │ 14    │ op_i32_const                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 18  │ 1     │ value 1                             │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 19  │ 0     │ op_i32_add                          │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 20  │ 16    │ op_local_set                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 21  │ 1     │ local index 1                       │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 22  │ 20    │ op_jump_sp                          │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 23  │ 0     │ target (loop start — backward jump) │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 24  │ -1    │ savedsp for looplabel = -1          │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 25  │ 15    │ op_local_get                        │
+  ├─────┼───────┼─────────────────────────────────────┤
+  │ 26  │ 0     │ local index 0                       │
+  └─────┴───────┴─────────────────────────────────────┘
+
+  there is no block, no loop — they are completely gone. the block is now represented solely by the jump at index 5–7 and the fact that normal fall-through skips it.
+  the loop is represented solely by the backward jump at 22–24.
+
+  ---
+  12. executing simple_loop through the dispatch loop
+
+  input: x = locals[0] = 0, i = locals[1] = 0. sp = -1.
+
+  the dispatch loop:
+  while (pc < c.length) {
+      switch (c[pc++]) {
+          case op_local_get  -> s[++sp] = l[c[pc++]];
+          case op_jump_if_sp -> { int t = c[pc++]; int ss = c[pc++]; if (s[sp--] != 0) { pc = t; sp = ss; } }
+          case op_jump_sp    -> { int t = c[pc]; sp = c[pc + 1]; pc = t; }
+          ...
+      }
+  }
+
+  iteration 1 (i=0, x=0):
+
+  - pc=0: op_local_get, l[1]=0 → s[0]=0, sp=0, pc=2
+  - pc=2: op_i32_const, c[3]=10 → s[1]=10, sp=1, pc=4
+  - pc=4: op_i32_ge_s → s[0]=(0>=10)?1:0=0, sp=0, pc=5
+  - pc=5: op_jump_if_sp, t=c[6]=25, ss=c[7]=-1, pop s[0]=0, sp=-1 → condition false → no jump, pc=8
+  - pc=8: op_local_get, l[0]=0 → s[0]=0, sp=0, pc=10
+  - pc=10: op_local_get, l[1]=0 → s[1]=0, sp=1, pc=12
+  - pc=12: op_i32_add → s[0]+=s[1]=0, sp=0, pc=13
+  - pc=13: op_local_set, l[0]=s[0]=0, sp=-1, pc=15
+  - pc=15: op_local_get, l[1]=0 → s[0]=0, sp=0, pc=17
+  - pc=17: op_i32_const, 1 → s[1]=1, sp=1, pc=19
+  - pc=19: op_i32_add → s[0]+=s[1]=1, sp=0, pc=20
+  - pc=20: op_local_set, l[1]=1, sp=-1, pc=22
+  - pc=22: op_jump_sp, t=c[23]=0, sp=c[24]=-1 → pc=0, sp=-1 ← loop restart
+
+  no function call. no iterator. no signal. just pc = 0.
+
+  iteration 11 (i=10, x=45):
+
+  - pc=0→4: push i=10, push 10, ge_s → s[0]=1, sp=0
+  - pc=5: op_jump_if_sp, t=25, ss=-1, pop s[0]=1, sp=-1 → condition true → pc=25, sp=-1
+  - pc=25: op_local_get, l[0]=45 → s[0]=45, sp=0, pc=27
+  - pc=27: 27 < 27 → false → exit while loop
+
+  invoke() does wasmvalue.i32(stack[sp--]) → returns i32(45).
+
+  ---
+  13. the complete comparison: what disappeared in v3
+
+  ┌──────────────────────────┬─────────────────────────────────────┬─────────────────────────────┬──────────────────────────────────┐
+  │          thing           │                 v1                  │             v2              │                v3                │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ data structure executed  │ list<instruction> tree              │ same tree                   │ flat int[]                       │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ recursion                │ executebody recurses per construct  │ same                        │ none — one flat loop             │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ iterator per loop iter   │ yes — for (instr : body)            │ yes                         │ none                             │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ execute() call per instr │ yes                                 │ yes                         │ none — switch(c[pc++]) inline    │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ type dispatch            │ instanceof on java object           │ instanceof on java object   │ switch on integer                │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ branch signal            │ heap object branch(n)               │ integer n+1                 │ nothing — pc = target            │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ depth decrement          │ per construct, per signal           │ per construct, per signal   │ never — resolved at compile time │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ stack reset on branch    │ sp = savedsp in each construct case │ same                        │ embedded in op_jump_sp           │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ label lookup             │ implicit in java call stack         │ implicit in java call stack │ labelat(n) during compile only   │
+  ├──────────────────────────┼─────────────────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+  │ jump target resolution   │ never needed (recursive)            │ never needed                │ compile time (backpatch)         │
+  └──────────────────────────┴─────────────────────────────────────┴─────────────────────────────┴──────────────────────────────────┘
+
+  the benchmark result says it best: fibonacci goes from 1.237 µs (v2) to 0.234 µs (v3) — a 5.3× speedup — because fibonacci's loop iterates many times and v3
+  eliminates every per-iteration overhead that v2 still carries.
+
+✻ worked for 2m 18s
+
+※ recap: built and explained v1, v2, and v3 webassembly interpreters. v3 compiles the instruction tree to a flat int array with backpatched jump targets and runs it
+  in a single loop. no immediate next action — waiting for your direction.
+
